@@ -630,25 +630,3 @@
 #     """,
 #     height=120
 # )
-
-# 1. Forzamos el cierre absoluto de procesos anteriores y limpiamos archivos
-!pkill -9 -f streamlit
-!pkill -9 -f cloudflared
-!rm -f /content/tunnel.log
-!rm -f /tmp/cloudflared
-
-# 2. Iniciamos tu aplicación de Streamlit
-!nohup streamlit run app.py --server.enableCORS false &>/content/logs.txt &
-
-# 3. Instalamos Cloudflare Tunnel en limpio
-!wget -q -O /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-!chmod +x /tmp/cloudflared
-
-# 4. Levantamos el puente hacia internet
-import time
-!nohup /tmp/cloudflared tunnel --url http://localhost:8501 > /content/tunnel.log 2>&1 &
-time.sleep(8) # Le damos 8 segunditos para asegurar que genere el link
-
-# 5. Mostramos tu link de acceso (usamos -a para forzar lectura de texto)
-print("👇 HAZ CLIC EN EL ENLACE DE TRYCLOUDFLARE DE ABAJO 👇")
-!grep -a -o 'https://.*\.trycloudflare\.com' /content/tunnel.log
