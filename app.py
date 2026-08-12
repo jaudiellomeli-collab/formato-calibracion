@@ -314,7 +314,6 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
 # 7. DATOS DEL CALIBRADOR (INFERIOR)
 # ==========================================
 with st.expander("📑 DATOS DE CALIBRACIÓN Y CALIBRADOR", expanded=(abrir_cs or abrir_multi)):
-    # Autoseleccionar Requerido si toca Cero-Span o Multipunto
     idx_calib = 1 if (abrir_cs or abrir_multi) else 0
     st.selectbox("Calibración req", ["No requerido", "Requerido"], index=idx_calib, key="calib_req", label_visibility="collapsed")
     
@@ -574,14 +573,14 @@ with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
     col_firma1, col_firma2 = st.columns(2)
     with col_firma1:
         st.markdown("#### Técnico / Operador")
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="empresa_tec", disabled=True)
+        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="empresa_tec")
         st.text_input("Nombre", value="José Alfredo Jiménez Ramos", key="nombre_tec")
         st.date_input("Fecha", datetime.date.today(), key="fecha_tec")
         st.text_area("Firma", placeholder="(Espacio para firma)", height=100, key="firma_tec")
 
     with col_firma2:
         st.markdown("#### Supervisado / Revisado por")
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="empresa_sup", disabled=True)
+        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="empresa_sup")
         st.text_input("Nombre", value="Beatriz Rodríguez Pérez", key="nombre_sup")
         st.date_input("Fecha", datetime.date.today(), key="fecha_sup")
         st.text_area("Firma", placeholder="(Espacio para firma)", height=100, key="firma_sup")
