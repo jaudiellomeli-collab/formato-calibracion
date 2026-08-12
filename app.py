@@ -8,7 +8,7 @@ import os
 st.set_page_config(layout="wide", page_title="Calibración O3 SIMAJ")
 
 # ==========================================
-# INYECCIÓN DE CSS (TEMA SIMAJ) CORREGIDO
+# INYECCIÓN DE CSS (TEMA SIMAJ + REGLAS ESTRICTAS DE PDF)
 # ==========================================
 estilos_personalizados = """
 <style>
@@ -16,12 +16,39 @@ estilos_personalizados = """
     h1, h2, h3 { color: #00B2A9 !important; font-weight: 800 !important; }
     h4 { color: #5C6670 !important; }
     hr { border-bottom: 3px solid #F37021 !important; margin: 1.5em 0 !important; }
-    
-    /* ESTILO A LAS CAJAS DE ALERTA (Success/Error) */
     .stAlert { border-left: 5px solid #00B2A9 !important; background-color: #f0fdfa !important; }
-    
-    /* COLOR A LOS BORDES DE SELECCIÓN */
     div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
+    
+    /* REGLAS MAESTRAS PARA EL PDF */
+    @media print {
+        /* 1. Forzar a que se impriman los colores de fondo y bordes exactos */
+        * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+        
+        /* 2. Ocultar menús, botones de Streamlit y el botón de imprimir */
+        header, footer, button, .stDeployButton, iframe { 
+            display: none !important; 
+        }
+        
+        /* 3. Desbloquear el scroll para que capture todo el largo de la página */
+        html, body, .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
+            height: auto !important;
+            overflow: visible !important;
+            position: static !important;
+        }
+        
+        .main .block-container {
+            max-width: 100% !important;
+            padding: 0 !important;
+        }
+        
+        /* 4. Evitar cortes feos a la mitad de una tabla */
+        div[data-testid="stVerticalBlock"] {
+            page-break-inside: avoid;
+        }
+    }
 </style>
 """
 st.markdown(estilos_personalizados, unsafe_allow_html=True)
@@ -558,7 +585,7 @@ st.markdown("**Conclusiones**")
 st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio de ±5%...", label_visibility="collapsed", key="res_conclusiones")
 
 # ==========================================
-# FIRMAS Y DESCARGA DIRECTA A PDF
+# FIRMAS Y DESCARGA 
 # ==========================================
 st.divider()
 col_firma1, col_firma2 = st.columns(2)
@@ -578,48 +605,17 @@ with col_firma2:
 
 st.markdown("<p style='text-align: center; font-size: 14px; color: gray;'>La evidencia fotográfica se entregará en un anexo.</p>", unsafe_allow_html=True)
 
-# NUEVO BOTÓN CON DESCARGA DIRECTA A PDF (LIBRERÍA EXTERNA)
+# Botón Imprimir Nativo (CSS ajustado para PDF perfecto)
 components.html(
     """
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <div style="text-align: center; margin-top: 20px;">
-        <button id="btn-descarga" onclick="descargarPDF()" style="padding: 12px 24px; font-size: 18px; font-weight: bold; background-color: #F37021; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            📥 Descargar Formato PDF Directo
+        <button onclick="window.print()" style="padding: 12px 24px; font-size: 18px; font-weight: bold; background-color: #F37021; color: white; border: none; border-radius: 8px; cursor: pointer;">
+            🖨️ Guardar Formato Completo como PDF
         </button>
+        <p style="font-family: sans-serif; color: #5C6670; font-size: 14px; margin-top: 10px;">
+            (Asegúrate de seleccionar "Guardar como PDF" en el menú "Destino")
+        </p>
     </div>
-    
-    <script>
-    function descargarPDF() {
-        var btn = document.getElementById("btn-descarga");
-        btn.innerText = "⏳ Generando PDF, espera unos segundos...";
-        btn.style.backgroundColor = "#5C6670";
-        
-        // Accedemos a la página principal por fuera de la "cajita invisible" de Streamlit
-        var parentDoc = window.parent.document;
-        var elemento = parentDoc.querySelector('.main');
-        
-        // Truco de ingeniería para que la fotografía del PDF capte todo lo que escribiste
-        var inputs = elemento.querySelectorAll('input, textarea');
-        inputs.forEach(i => {
-            if(i.tagName === 'TEXTAREA') { i.innerHTML = i.value; }
-            else { i.setAttribute('value', i.value); }
-        });
-        
-        var opciones = {
-            margin:       10,
-            filename:     'Calibracion_O3_SIMAJ.pdf',
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true, windowWidth: parentDoc.body.scrollWidth },
-            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-        
-        // Genera y descarga sin abrir el menú de impresión
-        html2pdf().set(opciones).from(elemento).save().then(() => {
-            btn.innerText = "📥 Descargar Formato PDF Directo";
-            btn.style.backgroundColor = "#F37021";
-        });
-    }
-    </script>
     """,
-    height=120
+    height=100
 )
