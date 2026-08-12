@@ -88,39 +88,51 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
             st.number_input("Presión ambiental (Torr) - Fin", value=634.0)
 
 # ==========================================
-# 2. HISTÓRICO
+# 2. HISTÓRICO (MOTOR DE LA LÓGICA DE APERTURA)
 # ==========================================
-with st.expander("📅 HISTÓRICO DE MANTENIMIENTOS", expanded=False):
+with st.expander("📅 HISTÓRICO DE MANTENIMIENTOS", expanded=True):
     h1, h2, h3, h4 = st.columns([2, 1.5, 1, 1.5])
     with h1: st.write("**Mantenimiento**")
     with h2: st.write("**Fecha de último registro**")
     with h3: st.write("**Periodicidad (Mes)**")
     with h4: st.write("**Mantenimiento Requerido**")
 
+    # Función actualizada que evalúa y retorna un valor Verdadero o Falso
     def fila_historico(nombre_mant, key_fecha, fecha_default, periodicidad_meses):
         c1, c2, c3, c4 = st.columns([2, 1.5, 1, 1.5])
         with c1: st.write(nombre_mant)
         with c2: fecha_ult = st.date_input(f"Fecha {key_fecha}", value=fecha_default, label_visibility="collapsed")
         with c3: st.write(str(periodicidad_meses))
         with c4:
-            if (fecha_ref - fecha_ult).days > (periodicidad_meses * 30): st.error("Requerido")
-            else: st.success("No Requerido")
+            es_requerido = (fecha_ref - fecha_ult).days > (periodicidad_meses * 30)
+            if es_requerido: 
+                st.error("Requerido")
+            else: 
+                st.success("No Requerido")
+            return es_requerido # Retornamos la respuesta para usarla en los menús de abajo
 
-    fila_historico("Mantenimiento Básico", "basico", datetime.date(2026, 5, 10), 1)
-    fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
-    fila_historico("Mantenimiento Completo", "completo", datetime.date(2025, 1, 1), 6)
-    fila_historico("Calibración Multipunto", "multipunto", datetime.date(2026, 1, 1), 6)
+    # Calculamos qué mantenimientos tocan hoy
+    req_basico = fila_historico("Mantenimiento Básico", "basico", datetime.date(2026, 5, 10), 1)
+    req_cs = fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
+    req_comp = fila_historico("Mantenimiento Completo", "completo", datetime.date(2025, 1, 1), 6)
+    req_multi = fila_historico("Calibración Multipunto", "multipunto", datetime.date(2026, 1, 1), 6)
+
+# Lógica general: Si toca mantenimiento completo, forzamos abrir casi todo.
+abrir_basico = req_basico or req_comp
+abrir_cs = req_cs or req_comp
+abrir_multi = req_multi or req_comp
+abrir_comp = req_comp
 
 # ==========================================
 # 3. FALLAS Y ALARMAS
 # ==========================================
-with st.expander("⚠️ DESCRIPCIÓN DE FALLA O ALARMA", expanded=False):
+with st.expander("⚠️ DESCRIPCIÓN DE FALLA O ALARMA", expanded=abrir_basico):
     st.text_area("Detalle de la eventualidad", placeholder="Mencionar falla, alarma o cualquier anormalidad detectada. Vincular con evento de bitácora...", label_visibility="collapsed")
 
 # ==========================================
 # 4. PARÁMETROS GENERALES
 # ==========================================
-with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=False):
+with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basico):
     h1, h2, h3, h4, h5, h6, h7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
     with h1: st.write("**Parámetro**")
     with h2: st.write("**Unidades**")
@@ -172,7 +184,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=False):
 # ==========================================
 # 5. VERIFICACIÓN Y AJUSTE DE FLUJO
 # ==========================================
-with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=False):
+with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
     col_cal1, col_cal2 = st.columns(2)
     with col_cal1:
         st.markdown("**Calibrador**")
@@ -275,7 +287,7 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=False):
 # ==========================================
 # 6. REVISIÓN BÁSICA DE COMPONENTES
 # ==========================================
-with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=False):
+with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico):
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
     with c2: st.write("**Estado**")
@@ -301,8 +313,11 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=False):
 # ==========================================
 # 7. DATOS DEL CALIBRADOR (INFERIOR)
 # ==========================================
-with st.expander("📑 DATOS DE CALIBRACIÓN Y CALIBRADOR", expanded=False):
-    st.selectbox("Calibración req", ["No requerido", "Requerido"], key="calib_req")
+with st.expander("📑 DATOS DE CALIBRACIÓN Y CALIBRADOR", expanded=(abrir_cs or abrir_multi)):
+    # Autoseleccionar Requerido si toca Cero-Span o Multipunto
+    idx_calib = 1 if (abrir_cs or abrir_multi) else 0
+    st.selectbox("Calibración req", ["No requerido", "Requerido"], index=idx_calib, key="calib_req", label_visibility="collapsed")
+    
     col_cal3, col_cal4 = st.columns(2)
     with col_cal3:
         st.markdown("**Calibrador**")
@@ -324,8 +339,9 @@ with st.expander("📑 DATOS DE CALIBRACIÓN Y CALIBRADOR", expanded=False):
 # ==========================================
 # 8. VERIFICACIÓN CERO-SPAN
 # ==========================================
-with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=False):
-    st.selectbox("Req Cero-Span", ["No requerido", "Requerido"], key="req_cero_span")
+with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
+    idx_cs = 1 if abrir_cs else 0
+    st.selectbox("Req Cero-Span", ["No requerido", "Requerido"], index=idx_cs, key="req_cero_span", label_visibility="collapsed")
 
     col_cs_izq, col_cs_der = st.columns(2)
     with col_cs_izq:
@@ -406,8 +422,9 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=False):
 # ==========================================
 # 9. CALIBRACIÓN MULTIPUNTO
 # ==========================================
-with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=False):
-    st.selectbox("Req Multipunto", ["No requerido", "Requerido"], key="req_multi")
+with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
+    idx_multi = 1 if abrir_multi else 0
+    st.selectbox("Req Multipunto", ["No requerido", "Requerido"], index=idx_multi, key="req_multi", label_visibility="collapsed")
 
     col_pts, col_res = st.columns([1.5, 1])
     with col_pts:
@@ -512,8 +529,9 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=False):
 # ==========================================
 # 10. REVISIÓN DETALLADA DE COMPONENTES
 # ==========================================
-with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=False):
-    st.selectbox("Req Detalle", ["No requerido", "Requerido"], key="req_detalle")
+with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp):
+    idx_comp = 1 if abrir_comp else 0
+    st.selectbox("Req Detalle", ["No requerido", "Requerido"], index=idx_comp, key="req_detalle", label_visibility="collapsed")
 
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
