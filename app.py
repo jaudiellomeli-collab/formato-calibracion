@@ -6,13 +6,18 @@ import os
 
 st.set_page_config(layout="wide", page_title="Calibración O3 SIMAJ")
 
-# --- CSS MEJORADO (Estilo SIMAJ + Colores semáforo) ---
+# --- CSS MEJORADO (Estilo SIMAJ + Semáforo) ---
 estilos_personalizados = """
 <style>
-    h1, h2, h3 { color: #00B2A9 !important; }
+    h1, h2, h3 { color: #00B2A9 !important; font-weight: 800 !important; }
+    h4 { color: #5C6670 !important; }
     hr { border-bottom: 3px solid #F37021 !important; margin: 1.5em 0 !important; }
-    .stSuccess { background-color: #d4edda !important; color: #155724 !important; border-left: 5px solid #28a745 !important; }
-    .stError { background-color: #f8d7da !important; color: #721c24 !important; border-left: 5px solid #dc3545 !important; }
+    /* Estilo de validación visual */
+    div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
+    @media print {
+        header, footer, .stDeployButton { display: none !important; }
+        details:not([open]) { display: none !important; }
+    }
 </style>
 """
 st.markdown(estilos_personalizados, unsafe_allow_html=True)
@@ -29,62 +34,58 @@ if os.path.exists("simaj.png"): st.image("simaj.png", width=300)
 
 st.title("FORMATO DE CALIBRACIÓN O3")
 
-# ==========================================
-# 1. DATOS DEL ANALIZADOR
-# ==========================================
+# --- 1. DATOS ANALIZADOR ---
 with st.expander("🛠️ DATOS DEL ANALIZADOR", expanded=True):
-    col_izq, col_der = st.columns(2)
-    with col_izq:
+    col1, col2 = st.columns(2)
+    with col1:
         estacion = st.selectbox("Estación:", [""] + list(equipos_o3.keys()))
         num_serie = equipos_o3.get(estacion, "")
-        st.text_input("Número de Serie (Automático):", value=num_serie, disabled=True)
-    with col_der:
-        st.date_input("Fecha de calibración", datetime.date.today())
+        st.text_input("Número de Serie:", value=num_serie, disabled=True)
+    with col2:
+        st.date_input("Fecha de calibración")
 
-# ==========================================
-# 2. VERIFICACIÓN Y AJUSTE DE FLUJO (Regla estricta 2.5%)
-# ==========================================
+# --- 2. FLUJOS (Regla 2.5%) ---
 with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=True):
-    st.caption("Nota: El Flujo Volumétrico debe estar en el rango de 500 cc/min ± 2.5% (487.5 - 512.5 cc/min)")
-    
-    def evaluar_flujo(val):
-        if val is None: return "", ""
-        cumple = 487.5 <= val <= 512.5
-        color = "success" if cumple else "error"
-        return f"{val} cc/min", color
+    def validar_color(val, min_v, max_v):
+        if val is None: return "gray"
+        return "green" if min_v <= val <= max_v else "red"
 
     c1, c2 = st.columns(2)
     with c1:
         v_ini = st.number_input("Flujo Volumétrico Inicial (cc/min)", value=None)
-        res, col = evaluar_flujo(v_ini)
-        if res: getattr(st, col)(f"Estado: {res}")
-        
+        color = validar_color(v_ini, 487.5, 512.5)
+        st.markdown(f":{color}[Estado: {'Cumple' if color=='green' else 'NO CUMPLE'}]")
     with c2:
         v_fin = st.number_input("Flujo Volumétrico Final (cc/min)", value=None)
-        res, col = evaluar_flujo(v_fin)
-        if res: getattr(st, col)(f"Estado: {res}")
+        color = validar_color(v_fin, 487.5, 512.5)
+        st.markdown(f":{color}[Estado: {'Cumple' if color=='green' else 'NO CUMPLE'}]")
 
-# ==========================================
-# 3. COMPONENTES (Estado Bueno/Malo, Limpieza/Remplazo)
-# ==========================================
+# --- 3. REVISIÓN COMPONENTES (Semáforo Si/No/Bueno/Malo) ---
 with st.expander("🔍 REVISIÓN DE COMPONENTES", expanded=True):
     def fila_comp(nombre):
         c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 2])
         with c1: st.write(nombre)
         with c2: 
             estado = st.selectbox("Estado", ["Bueno", "Malo"], key=f"e_{nombre}")
-            if estado == "Bueno": st.success("Bueno")
-            else: st.error("Malo")
-        with c3: st.selectbox("¿Limpieza?", ["Sí", "No"], key=f"l_{nombre}")
-        with c4: st.selectbox("¿Remplazo?", ["Sí", "No"], key=f"r_{nombre}")
-        with c5: st.text_input("Observaciones", key=f"o_{nombre}", label_visibility="collapsed")
+            st.markdown(f":{'green' if estado=='Bueno' else 'red'}[{estado}]")
+        with c3: 
+            limp = st.selectbox("¿Limpieza?", ["Sí", "No"], key=f"l_{nombre}")
+            st.markdown(f":{'green' if limp=='Sí' else 'red'}[{limp}]")
+        with c4: 
+            remp = st.selectbox("¿Remplazo?", ["Sí", "No"], key=f"r_{nombre}")
+            st.markdown(f":{'green' if remp=='Sí' else 'red'}[{remp}]")
+        with c5: st.text_input("Obs", key=f"o_{nombre}", label_visibility="collapsed")
 
-    fila_comp("Bomba de Vacío")
+    fila_comp("Bomba de Vacío Externa")
+    fila_comp("Bomba de Vacío Interna")
     fila_comp("Filtro 47mm")
-    fila_comp("O-rings")
 
-# ==========================================
-# (Agrega aquí las secciones que faltan usando la misma lógica de expanders)
-# ==========================================
-
-st.markdown("<p style='text-align: center; color: gray;'>Presiona Ctrl+P para guardar el formato PDF.</p>", unsafe_allow_html=True)
+# --- 4. FIRMAS ---
+with st.expander("✍️ FIRMAS", expanded=True):
+    c1, c2 = st.columns(2)
+    with c1: 
+        st.text_input("Empresa/Institución")
+        st.text_input("Nombre Técnico")
+    with c2: 
+        st.text_input("Empresa/Institución")
+        st.text_input("Nombre Supervisor")
