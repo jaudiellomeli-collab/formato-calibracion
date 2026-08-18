@@ -79,7 +79,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         num_serie_val = equipos_o3.get(estacion_sel, "")
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         
-        st.selectbox("El analizador presenta Falla o Alarma", ["No 🟢", "Sí 🔴"])
+        st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
 
     with col_der:
         st.markdown("#### ")
@@ -259,10 +259,22 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
         
         return val
 
+    # VERIFICACIÓN INICIAL
     flujo_vol_verif = render_tabla_flujo("Verificación", val_ini_est, val_ini_vol, "verif")
+    
+    # Evaluar requisito de ajuste Inmediatamente después de la verificación
+    req_ajuste_final = ""
+    if flujo_vol_verif is not None:
+        d_v = (flujo_vol_verif - 500) / 500
+        req_ajuste_final = "No" if (-0.025 <= d_v <= 0.025) else "SÍ"
+        
+    st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
+    st.caption("*La condición se cumple cuando la desviación es menor o igual a ±2.5%")
+
+    # AJUSTE FINAL
     flujo_vol_ajus = render_tabla_flujo("Ajuste", val_fin_est, val_fin_vol, "ajus")
 
-    st.markdown("#### VERIFICACIÓN | AJUSTE (Flujo Volumétrico)")
+    st.markdown("#### RESUMEN VERIFICACIÓN | AJUSTE")
     col_v1, col_v2 = st.columns(2)
     cond_resumen_v = ""
     with col_v1:
@@ -298,10 +310,6 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
                 if cond_resumen_a == "Cumple": st.success(cond_resumen_a)
                 else: st.error(cond_resumen_a)
 
-    req_ajuste_final = "SI" if cond_resumen_v == "NO CUMPLE" else "No" if cond_resumen_v == "Cumple" else ""
-    st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
-    st.caption("*La condición se cumple cuando la desviación es menor o igual a ±2.5%")
-
 # ==========================================
 # 6. REVISIÓN BÁSICA DE COMPONENTES
 # ==========================================
@@ -316,9 +324,9 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
     def fila_componente_basica(nombre, key):
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
         with c1: st.write(nombre)
-        with c2: st.selectbox("Estado", ["Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-        with c3: st.selectbox("Limpieza", ["Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
-        with c4: st.selectbox("Reemplazo", ["Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
+        with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
+        with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
+        with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
         with c5: st.text_input("Obs", placeholder="Especificar detalles o justificación...", key=f"obs_{key}", label_visibility="collapsed")
 
     fila_componente_basica("Lámpara UV (revisión electrónica)", "lamp_uv_rev")
@@ -434,7 +442,7 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
     st.write("")
     col_scrub1, col_scrub2 = st.columns([1, 2])
     with col_scrub1: st.selectbox("¿Se realizó verificación de Scrubber?", ["Selecciona...", "Sí 🟢", "No 🔴"], key="cs_verif_scrubber")
-    with col_scrub2: st.text_input("Observaciones", placeholder="Detalles de verificación...", key="cs_obs_scrubber")
+    with col_scrub2: st.text_input("Observaciones", placeholder="Especificar detalles o justificación...", key="cs_obs_scrubber")
 
 # ==========================================
 # 9. CALIBRACIÓN MULTIPUNTO
@@ -480,7 +488,11 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
         with c4:
             if desviaciones:
                 promedio = sum(desviaciones) / len(desviaciones)
-                st.write(f"**{promedio * 100:.2f}%**")
+                # Aplicamos color rojo si el promedio es mayor al 2.5% (0.025)
+                if abs(promedio) > 0.025:
+                    st.markdown(f"**:red[{promedio * 100:.2f}%]**")
+                else:
+                    st.write(f"**{promedio * 100:.2f}%**")
             else: promedio = None; st.write("")
 
     m, b, r2 = None, None, None
@@ -490,6 +502,8 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
             m, b = np.polyfit(x_arr, y_arr, 1)
             r2 = (np.corrcoef(x_arr, y_arr)[0,1])**2
         except: pass
+
+    cond_m = cond_b = cond_r2 = cond_prom = False
 
     with col_res:
         st.markdown("**Ecuación y Condición**")
@@ -503,18 +517,35 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
             st.write(f"{m:.4f}x + {b:.4f}" if m is not None else "-")
         with r3:
             if m is not None:
-                if 0.98 <= m <= 1.2: st.success("Cumple")
+                cond_m = 0.98 <= m <= 1.02
+                cond_b = -2.0 <= b <= 2.0
+                cond_r2 = 0.99 <= r2 <= 1.0
+                
+                if cond_m: st.success("Cumple")
                 else: st.error("NO CUMPLE")
-                if -2.0 <= b <= 2.0: st.success("Cumple")
+                
+                if cond_b: st.success("Cumple")
                 else: st.error("NO CUMPLE")
-                if 0.99 <= r2 <= 1.0: st.success("Cumple")
+                
+                if cond_r2: st.success("Cumple")
                 else: st.error("NO CUMPLE")
-            st.write("") 
+            else:
+                st.write("") 
             
         st.markdown("**Condición Promedio**")
         if promedio is not None:
-            if -0.25 <= promedio <= 0.25: st.success("Cumple ✅")
+            cond_prom = -0.025 <= promedio <= 0.025
+            if cond_prom: st.success("Cumple ✅")
             else: st.error("NO CUMPLE ❌")
+
+    # VALIDACIÓN GLOBAL DE MULTIPUNTO
+    st.write("---")
+    if len(x_vals) > 0:
+        cond_puntos = len(x_vals) == 5
+        if cond_m and cond_b and cond_r2 and cond_prom and cond_puntos:
+            st.success("✅ **CALIBRACIÓN MULTIPUNTO APROBADA:** Cumple todas las condiciones establecidas y cuenta con los 5 puntos medidos.")
+        else:
+            st.error("❌ **CALIBRACIÓN MULTIPUNTO RECHAZADA:** No cumple alguna condición (m, b, R2, desviación promedio) o faltan puntos por capturar.")
 
     col_graf, col_texto = st.columns([1.5, 1])
     with col_graf:
@@ -538,9 +569,10 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
         $y = mx + b$
         $y$ = instrumento (ppm) | $x$ = calibrador (ppm) | $m$ = ganancia | $b$ = offset
         **Aceptada si:**
-        * $m$ entre 0.98 y 1.2
+        * $m$ entre 0.98 y 1.02
         * $b$ entre -2 a +2
         * $R^2$ mayor que 0.99.
+        * El promedio de desviación estándar no excede el ±2.5%.
         ''')
 
 # ==========================================
@@ -560,12 +592,12 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
     def fila_componente_detallada(nombre, key, placeholder="Especificar detalles o justificación..."):
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
         with c1: st.write(nombre)
-        with c2: st.selectbox("Estado", ["Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-        with c3: st.selectbox("Limpieza", ["Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
-        with c4: st.selectbox("Reemplazo", ["Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
+        with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
+        with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
+        with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
         with c5: st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
 
-    fila_componente_detallada("Bomba de Vacío externa", "det_bomba_ext", "Registrar presión...")
+    fila_componente_detallada("Bomba de Vacío externa", "det_bomba_ext", "Registrar presión")
     fila_componente_detallada("Tubería", "det_tub")
     fila_componente_detallada("Filtro interno de 47 mm", "det_filtro_int")
     fila_componente_detallada("Bomba de Vacío Interna", "det_bomba_int")
