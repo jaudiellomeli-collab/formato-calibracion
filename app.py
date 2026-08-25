@@ -2,13 +2,16 @@ import streamlit as st
 import datetime
 import numpy as np
 import plotly.graph_objects as go
+import pandas as pd
+import io
 import os
+import xlsxwriter
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
 
 # ==========================================
-# CSS GLOBAL Y ESTILOS DE IMPRESIÓN
+# CSS GLOBAL Y COMPRESOR EXTREMO PARA PDF
 # ==========================================
 st.markdown("""
 <style>
@@ -18,19 +21,45 @@ st.markdown("""
     .stAlert { border-left: 5px solid #00B2A9 !important; background-color: #f0fdfa !important; }
     div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
     
-    /* REGLAS MAESTRAS PARA EL PDF NATIVO */
+    /* COMPRESOR EXTREMO PARA EL PDF (Reduce de 9 hojas a 2-3) */
     @media print {
+        @page { size: letter portrait; margin: 0.5cm; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        header, footer, .stDeployButton, [data-testid="stSidebar"] { display: none !important; }
+        header, footer, .stDeployButton, [data-testid="stSidebar"], #btn-imprimir { display: none !important; }
+        
+        html, body, [class*="st-"] { font-size: 11px !important; line-height: 1.1 !important; color: black !important; }
+        h1 { font-size: 14px !important; margin: 0 !important; padding: 0 !important; }
+        h2, h3 { font-size: 12px !important; margin: 2px 0 !important; padding: 0 !important; }
+        h4 { font-size: 11px !important; margin: 2px 0 !important; padding: 0 !important; }
+        
         html, body, .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
             height: auto !important; overflow: visible !important; position: static !important;
         }
+        
+        /* Reducir espacios y márgenes a cero */
         .main .block-container { max-width: 100% !important; padding: 0 !important; }
-        div[data-testid="stVerticalBlock"] { page-break-inside: avoid; }
-        /* Oculta lo que esté cerrado */
+        [data-testid="column"] { padding: 0 4px !important; }
+        [data-testid="stVerticalBlock"] { gap: 0 !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0.5em !important; }
+        
+        /* Comprimir Inputs y Selects */
+        input[type="text"], input[type="number"], textarea {
+            font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
+        }
+        div[data-baseweb="select"] > div {
+            font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
+        }
+        
+        /* Esconder íconos innecesarios en el papel */
+        .stSelectbox svg, .stExpander > details > summary > svg { display: none !important; }
+        
+        /* Ajustar expanders */
+        .stExpander { border: none !important; border-bottom: 1px solid #ddd !important; margin-bottom: 2px !important; page-break-inside: avoid; }
+        .stExpander summary { padding: 2px 0 !important; min-height: 0 !important; }
         details:not([open]) { display: none !important; }
-        /* Oculta los botones de imprimir en el PDF */
-        #btn-imprimir { display: none !important; }
+        
+        hr { margin: 2px 0 !important; }
+        .stAlert { padding: 4px !important; border-width: 2px !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -38,24 +67,10 @@ st.markdown("""
 # ==========================================
 # BASES DE DATOS DE EQUIPOS
 # ==========================================
-equipos_o3 = {
-    "Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", 
-    "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", 
-    "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"
-}
-equipos_nox = {
-    "Pintas": "24-0179", "Santa Fe": "24-0579", "Miravalle": "24-0587", "Centro": "24-0595", 
-    "Country": "23-2360", "Atemajac": "24-0705", "Oblatos": "24-0710", "Santa Margarita": "24-0570", 
-    "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700"
-}
-equipos_co = {
-    "Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", 
-    "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", 
-    "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395"
-}
-equipos_so2 = {
-    "Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763"
-}
+equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
+equipos_nox = {"Pintas": "24-0179", "Santa Fe": "24-0579", "Miravalle": "24-0587", "Centro": "24-0595", "Country": "23-2360", "Atemajac": "24-0705", "Oblatos": "24-0710", "Santa Margarita": "24-0570", "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700"}
+equipos_co = {"Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395"}
+equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763"}
 
 # ==========================================
 # MENÚ LATERAL (SIDEBAR)
@@ -64,22 +79,20 @@ st.sidebar.title("🛠️ Menú SIMAJ")
 if os.path.exists("simaj.png"): st.sidebar.image("simaj.png")
 gas_sel = st.sidebar.radio("Selecciona el Gas a Calibrar:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"])
 
+datos_resumen = {}
+
 # Variables dinámicas de acuerdo al gas
 if gas_sel == "Ozono (O3)":
-    equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
-    flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003
+    equipos_act = equipos_o3; modelo_analizador = "Serinus 10"; flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003
     puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
 elif gas_sel == "Óxidos de Nitrógeno (NOx)":
-    equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
-    flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003
+    equipos_act = equipos_nox; modelo_analizador = "Serinus 40"; flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003
     puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
 elif gas_sel == "Monóxido de Carbono (CO)":
-    equipos_act = equipos_co; modelo_analizador = "Serinus 30"
-    flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5
+    equipos_act = equipos_co; modelo_analizador = "Serinus 30"; flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5
     puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.001]; span_gen_default = 40.0
 else: # SO2
-    equipos_act = equipos_so2; modelo_analizador = "Serinus 50"
-    flujo_ideal_vol = 700; flujo_tol = 0.025; cero_tol = 0.003
+    equipos_act = equipos_so2; modelo_analizador = "Serinus 50"; flujo_ideal_vol = 700; flujo_tol = 0.025; cero_tol = 0.003
     puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
 
 st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
@@ -90,8 +103,8 @@ st.subheader("Analizadores de Gases")
 # ==========================================
 def evaluar_y_mostrar(val, min_val, max_val):
     if val is None: st.write("")
-    elif min_val <= val <= max_val: st.success("Cumple ✅")
-    else: st.error("NO CUMPLE ❌")
+    elif min_val <= val <= max_val: st.success("Cumple ✅"); return True
+    else: st.error("NO CUMPLE ❌"); return False
 
 def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
@@ -99,9 +112,10 @@ def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     with c2: st.write(unit)
     with c3: st.write(ideal_str)
     with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
-    with c5: evaluar_y_mostrar(val_ini, min_val, max_val)
+    with c5: r_ini = evaluar_y_mostrar(val_ini, min_val, max_val)
     with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
-    with c7: evaluar_y_mostrar(val_fin, min_val, max_val)
+    with c7: r_fin = evaluar_y_mostrar(val_fin, min_val, max_val)
+    return r_ini, r_fin 
 
 def fila_libre(param, unit, ideal_str, key):
     c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
@@ -112,14 +126,14 @@ def fila_libre(param, unit, ideal_str, key):
     with c5: st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
     with c6: st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
     with c7: st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
+    return None, None
 
 def fila_comp(nombre, key, placeholder="Especificar detalles..."):
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write(nombre)
     with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-    # LEYENDAS AGREGADAS (Tooltips)
-    with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed", help="Indique si se realizó una limpieza al componente")
-    with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed", help="Indique si se realizó un reemplazo al componente")
+    with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
+    with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
     with c5: st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
 
 # ==========================================
@@ -131,9 +145,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
         estacion_sel = st.selectbox("Estación:", estaciones)
         
-        fab_final = "ACOEM"
-        mod_final = modelo_analizador
-        
+        fab_final = "ACOEM"; mod_final = modelo_analizador
         if gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas": mod_final = "ML9830"
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
@@ -144,10 +156,13 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0)
         
-        # LÓGICA CONDICIONAL DE FALLA
         falla = st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
         if falla == "Sí 🔴":
             st.text_area("Descripción de Falla o Alarma", placeholder="Mencionar falla, alarma o anormalidad...")
+
+        datos_resumen["Estación"] = estacion_sel
+        datos_resumen["Gas Calibrado"] = gas_sel
+        datos_resumen["Número de Serie"] = num_serie_val
 
     with col_der:
         st.markdown("#### ")
@@ -158,6 +173,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
             st.time_input("Hora (Inicial)", value=None)
             st.number_input("Temp exterior (C°) - Ini", value=0.0)
             st.number_input("Temp interior (C°) - Ini", value=0.0)
+            datos_resumen["Fecha de Servicio"] = str(fecha_ref)
 
         with col_fin:
             st.markdown("### Final")
@@ -189,13 +205,12 @@ with st.expander("📅 HISTÓRICO DE MANTENIMIENTOS", expanded=True):
 
     req_basico = fila_historico("Mantenimiento Básico", "basico", datetime.date(2026, 5, 10), 1)
     req_cs = fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
-    # MULTIPUNTO ELIMINADO DEL HISTÓRICO
     req_comp = fila_historico("Mantenimiento Completo (Abarca Multi.)", "completo", datetime.date(2025, 1, 1), 6)
 
 abrir_basico = req_basico or req_comp
 abrir_cs = req_cs or req_comp
-abrir_multi = req_comp # Se abre si toca Mantenimiento Completo
-abrir_comp = req_comp # Se abre si toca Mantenimiento Completo
+abrir_multi = req_comp
+abrir_comp = req_comp
 
 # ==========================================
 # 3. PARÁMETROS GENERALES
@@ -210,59 +225,69 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
     with h6: st.write("**Final**")
     with h7: st.write("**Comentarios**")
 
+    resultados_pg = []
+
+    def procesar_resultado(r_ini, r_fin):
+        if r_fin is not None: resultados_pg.append(r_fin)
+        elif r_ini is not None: resultados_pg.append(r_ini)
+
     if gas_sel == "Ozono (O3)":
         fila_libre("Flujo Estándar", "cc/min", "500", "o3_f_est")
-        fila_regla("Flujo Volumétrico", "cc/min", "500", 487.5, 512.5, "o3_f_vol") 
-        fila_regla("Presión de gas", "Torr", "629", 619.0, 630.0, "o3_p_gas")
-        fila_regla("Voltaje de referencia", "Volts", "1.4 - 4", 1.4, 4.0, "o3_v_ref")
-        fila_regla("Corriente de la lámpara", "mA", "9.5 - 10.5", 9.5, 10.5, "o3_c_lamp")
-        fila_regla("Temperatura de la lámpara", "°C", "45 - 55", 45.0, 55.0, "o3_t_lamp")
-        fila_regla("Pot de la lámpara UV", "N/A", "254", 254.0, 254.0, "o3_pot")
-        fila_regla("Temperatura del Chassis", "°C", "0 - 50", 0.0, 50.0, "o3_t_chas")
-        fila_regla("Temperatura del flujo", "°C", "10 - 90", 10.0, 90.0, "o3_t_flujo")
-        fila_regla("INPUT (Pots)", "N/A", "50-200", 50.0, 200.0, "o3_in")
+        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "500", 487.5, 512.5, "o3_f_vol"))
+        procesar_resultado(*fila_regla("Presión de gas", "Torr", "629", 619.0, 630.0, "o3_p_gas"))
+        procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.4 - 4", 1.4, 4.0, "o3_v_ref"))
+        procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "9.5 - 10.5", 9.5, 10.5, "o3_c_lamp"))
+        procesar_resultado(*fila_regla("Temperatura de la lámpara", "°C", "45 - 55", 45.0, 55.0, "o3_t_lamp"))
+        procesar_resultado(*fila_regla("Pot de la lámpara UV", "N/A", "254", 254.0, 254.0, "o3_pot"))
+        procesar_resultado(*fila_regla("Temperatura del Chassis", "°C", "0 - 50", 0.0, 50.0, "o3_t_chas"))
+        procesar_resultado(*fila_regla("Temperatura del flujo", "°C", "10 - 90", 10.0, 90.0, "o3_t_flujo"))
+        procesar_resultado(*fila_regla("INPUT (Pots)", "N/A", "50-200", 50.0, 200.0, "o3_in"))
         fila_libre("Ganancia", "N/A", "N/A", "o3_gan")
         
     elif gas_sel == "Óxidos de Nitrógeno (NOx)":
         fila_libre("Flujo Estándar", "cc/min", "650", "nox_f_est")
-        fila_regla("Flujo Volumétrico", "cc/min", "650", 617.5, 682.5, "nox_f_vol") 
-        fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas")
-        fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda")
-        fila_regla("Temp. del convertidor", "°C", "250-335", 250.0, 335.0, "nox_t_conv")
-        fila_regla("Temperatura del Chassis", "°C", "0-50", 0.0, 50.0, "nox_t_chas")
-        fila_regla("Temperatura de Manifold", "°C", "50", 45.0, 55.0, "nox_t_man")
-        fila_regla("Temperatura de Cooler", "°C", "13 ±10%", 11.7, 14.3, "nox_t_cool")
-        fila_regla("Alto voltaje", "Volt", "640-670", 640.0, 670.0, "nox_alto_v")
-        fila_regla("Flujo de vacio", "torr", "50-200", 50.0, 200.0, "nox_f_vacio")
+        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "650", 617.5, 682.5, "nox_f_vol"))
+        procesar_resultado(*fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas"))
+        procesar_resultado(*fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda"))
+        procesar_resultado(*fila_regla("Temp. del convertidor", "°C", "250-335", 250.0, 335.0, "nox_t_conv"))
+        procesar_resultado(*fila_regla("Temperatura del Chassis", "°C", "0-50", 0.0, 50.0, "nox_t_chas"))
+        procesar_resultado(*fila_regla("Temperatura de Manifold", "°C", "50", 45.0, 55.0, "nox_t_man"))
+        procesar_resultado(*fila_regla("Temperatura de Cooler", "°C", "13 ±10%", 11.7, 14.3, "nox_t_cool"))
+        procesar_resultado(*fila_regla("Alto voltaje", "Volt", "640-670", 640.0, 670.0, "nox_alto_v"))
+        procesar_resultado(*fila_regla("Flujo de vacio", "torr", "50-200", 50.0, 200.0, "nox_f_vacio"))
         fila_libre("Ganancia", "N/A", "N/A", "nox_gan")
         
     elif gas_sel == "Monóxido de Carbono (CO)":
         fila_libre("Flujo Estándar", "cc/min", "1000", "co_f_est")
-        fila_regla("Flujo Volumétrico", "cc/min", "1000", 975.0, 1025.0, "co_f_vol")
+        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "1000", 975.0, 1025.0, "co_f_vol"))
         fila_libre("Presión de celda", "Torr", "631.7", "co_p_celda") 
-        fila_regla("IR Source", "Volt", "5 ± 0.5", 4.5, 5.5, "co_ir")
-        fila_regla("Temp. de Scrubber", "°C", "90 ± 10", 80.0, 100.0, "co_t_scrub")
-        fila_regla("Voltaje de referencia", "Volt", "3.6 - 4.4", 3.6, 4.4, "co_v_ref")
-        fila_regla("Voltaje de concentración", "Volt", "0 - 3.1", 0.0, 3.1, "co_v_conc")
-        fila_regla("Temp. celda de reaccion", "°C", "50", 45.0, 55.0, "co_t_celda")
-        fila_regla("Temperatura del Chassis", "°C", "0-50", 0.0, 50.0, "co_t_chas")
-        fila_regla("Temperatura de flujo", "°C", "50", 45.0, 55.0, "co_t_flujo")
-        fila_regla("Temperatura del espejo", "°C", "50 ± 10", 40.0, 60.0, "co_t_esp")
-        fila_regla("INPUT (Pots)", "N/A", "180-230", 180.0, 230.0, "co_in")
+        procesar_resultado(*fila_regla("IR Source", "Volt", "5 ± 0.5", 4.5, 5.5, "co_ir"))
+        procesar_resultado(*fila_regla("Temp. de Scrubber", "°C", "90 ± 10", 80.0, 100.0, "co_t_scrub"))
+        procesar_resultado(*fila_regla("Voltaje de referencia", "Volt", "3.6 - 4.4", 3.6, 4.4, "co_v_ref"))
+        procesar_resultado(*fila_regla("Voltaje de concentración", "Volt", "0 - 3.1", 0.0, 3.1, "co_v_conc"))
+        procesar_resultado(*fila_regla("Temp. celda de reaccion", "°C", "50", 45.0, 55.0, "co_t_celda"))
+        procesar_resultado(*fila_regla("Temperatura del Chassis", "°C", "0-50", 0.0, 50.0, "co_t_chas"))
+        procesar_resultado(*fila_regla("Temperatura de flujo", "°C", "50", 45.0, 55.0, "co_t_flujo"))
+        procesar_resultado(*fila_regla("Temperatura del espejo", "°C", "50 ± 10", 40.0, 60.0, "co_t_esp"))
+        procesar_resultado(*fila_regla("INPUT (Pots)", "N/A", "180-230", 180.0, 230.0, "co_in"))
         fila_libre("Ganancia", "N/A", "N/A", "co_gan")
         
     else: # SO2
         fila_libre("Flujo", "cc/min", "700", "so2_f_vol")
         fila_libre("Presión de gas", "Torr", "-", "so2_p_gas")
-        fila_regla("Voltaje de referencia", "Volts", "1.5 - 3.5", 1.5, 3.5, "so2_v_ref")
-        fila_regla("Corriente de la lámpara", "mA", "34 - 36", 34.0, 36.0, "so2_c_lamp")
-        fila_regla("Alto voltaje", "Volts", "690 - 715", 690.0, 715.0, "so2_alto_v")
-        fila_regla("Temperatura del Chassis", "°C", "0 - 50", 0.0, 50.0, "so2_t_chas")
-        fila_regla("Temperatura de celda", "°C", "47-53", 47.0, 53.0, "so2_t_celda")
-        fila_regla("Temperatura del Cooler", "°C", "11.7-14.3", 11.7, 14.3, "so2_t_cool")
-        fila_regla("Temperatura del bloque", "°C", "50", 45.0, 55.0, "so2_t_bloq")
+        procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.5 - 3.5", 1.5, 3.5, "so2_v_ref"))
+        procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "34 - 36", 34.0, 36.0, "so2_c_lamp"))
+        procesar_resultado(*fila_regla("Alto voltaje", "Volts", "690 - 715", 690.0, 715.0, "so2_alto_v"))
+        procesar_resultado(*fila_regla("Temperatura del Chassis", "°C", "0 - 50", 0.0, 50.0, "so2_t_chas"))
+        procesar_resultado(*fila_regla("Temperatura de celda", "°C", "47-53", 47.0, 53.0, "so2_t_celda"))
+        procesar_resultado(*fila_regla("Temperatura del Cooler", "°C", "11.7-14.3", 11.7, 14.3, "so2_t_cool"))
+        procesar_resultado(*fila_regla("Temperatura del bloque", "°C", "50", 45.0, 55.0, "so2_t_bloq"))
         fila_libre("Valor de la ganancia", "-", "-", "so2_gan")
-        fila_regla("Valor de ajuste POT lámpara", "-", "10-100", 10.0, 100.0, "so2_pot")
+        procesar_resultado(*fila_regla("Valor de ajuste POT lámpara", "-", "10-100", 10.0, 100.0, "so2_pot"))
+
+    if len(resultados_pg) > 0:
+        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
+    else: datos_resumen["Parámetros Generales"] = "Sin datos"
 
 # ==========================================
 # 4. VERIFICACIÓN Y AJUSTE DE FLUJO
@@ -273,11 +298,8 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
         st.markdown("**Calibrador de Flujo**")
         st.text_input("Fabricante", value="Bios International Corp", key="fab_cal1")
         st.text_input("Modelo", value="Definer 220 M", key="mod_cal1")
-        
-        # Menú dinámico de N/S de Flujo
         sel_ns_flujo = st.selectbox("N/S", ["129115", "Otro..."], key="ns_cal1_sel")
-        if sel_ns_flujo == "Otro...":
-            st.text_input("Especifique N/S del Calibrador de Flujo", key="ns_cal1_otro")
+        if sel_ns_flujo == "Otro...": st.text_input("Especifique N/S del Calibrador de Flujo", key="ns_cal1_otro")
 
     with col_cal2:
         st.markdown("**Certificación**")
@@ -285,11 +307,6 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
         st.text_input("Técnico", value="Lizeth Morales", key="tec_cal1")
         st.date_input("Vigente hasta", datetime.date(2026, 6, 20), key="vig_cal1")
         st.text_input("No de certificado", value="E13496529 Flujo", key="cert_cal1")
-
-    st.markdown("**Parámetro medido por calibrador**")
-    col_p1, col_p2 = st.columns(2)
-    with col_p1: st.number_input("Presión Ambiental medida (Torr)", value=None, key="p_amb_calib")
-    with col_p2: st.number_input("Temperatura interna (°C)", value=None, key="t_int_calib")
 
     def eval_flujo(val, ideal, tolerancia):
         if val is None: return "", "", ""
@@ -324,7 +341,6 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
             elif cond == "NO CUMPLE": st.error(cond)
         return val
 
-    # Renderiza SIEMPRE la verificación
     flujo_vol_verif = render_tabla_flujo("Verificación", "verif")
     
     req_ajuste_final = ""
@@ -335,9 +351,18 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
     st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
     st.caption(f"*La condición se cumple cuando la desviación es menor o igual a ±{flujo_tol*100}%")
 
-    # SOLO MUESTRA AJUSTE SI LA VERIFICACIÓN NO CUMPLE
+    flujo_vol_ajus = None
     if req_ajuste_final == "SÍ":
         flujo_vol_ajus = render_tabla_flujo("Ajuste", "ajus")
+
+    # Dictamen de Flujo
+    if flujo_vol_ajus is not None:
+        d_a = (flujo_vol_ajus - flujo_ideal_vol) / flujo_ideal_vol
+        datos_resumen["Ajuste de Flujo"] = "Cumple" if (-flujo_tol <= d_a <= flujo_tol) else "NO CUMPLE"
+    elif flujo_vol_verif is not None:
+        d_v = (flujo_vol_verif - flujo_ideal_vol) / flujo_ideal_vol
+        datos_resumen["Ajuste de Flujo"] = "Cumple" if (-flujo_tol <= d_v <= flujo_tol) else "NO CUMPLE"
+    else: datos_resumen["Ajuste de Flujo"] = "Sin datos"
 
 # ==========================================
 # 5. REVISIÓN BÁSICA DE COMPONENTES
@@ -346,8 +371,9 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
     with c2: st.write("**Estado**")
-    with c3: st.write("**Limpieza**")
-    with c4: st.write("**Reemplazo**")
+    # LEYENDAS INYECTADAS AQUÍ
+    with c3: st.markdown("<div title='Indique si se realizó la limpieza de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Limpieza ℹ️</b></div>", unsafe_allow_html=True)
+    with c4: st.markdown("<div title='Indique si se realizó un reemplazo de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Reemplazo ℹ️</b></div>", unsafe_allow_html=True)
     with c5: st.write("**Observaciones**")
 
     if gas_sel == "Ozono (O3)":
@@ -385,10 +411,8 @@ with st.expander("📑 DATOS DEL CALIBRADOR", expanded=(abrir_cs or abrir_multi)
     with col_cal3:
         st.text_input("Fabricante", value="ACOEM", key="fab_calib2")
         st.text_input("Modelo", value="Serinus Cal 3000", key="mod_calib2")
-        # Menú dinámico de N/S para Calibrador de Gases
         sel_ns_gases = st.selectbox("N/S", ["23-1998", "24-1135", "Otro..."], key="ns_calib2")
-        if sel_ns_gases == "Otro...":
-            st.text_input("Especifique N/S del Calibrador de Gases", key="ns_calib2_otro")
+        if sel_ns_gases == "Otro...": st.text_input("Especifique N/S del Calibrador de Gases", key="ns_calib2_otro")
 
     with col_cal4:
         st.markdown("**Certificación**")
@@ -432,6 +456,9 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             with c3: st.write("min")
 
     col_cs_cero, col_cs_span = st.columns(2)
+    dif_c_ok = span_s_ok = False
+    dif_c = desv_s = None
+    
     with col_cs_cero:
         st.markdown("#### Concentración Cero")
         c1, c2, c3 = st.columns(3)
@@ -446,13 +473,14 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             if resp_c is not None:
                 dif_c = resp_c - val_cg
                 st.write(f"**{dif_c:.4f}**")
-            else: dif_c = None; st.write("")
+            else: st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if dif_c is not None:
-                if -cero_tol <= dif_c <= cero_tol: st.success("Cumple ✅")
+                dif_c_ok = -cero_tol <= dif_c <= cero_tol
+                if dif_c_ok: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
 
     with col_cs_span:
@@ -468,14 +496,20 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             if resp_s is not None and val_sg != 0:
                 desv_s = (resp_s - val_sg) / val_sg
                 st.write(f"**{desv_s * 100:.2f}%**")
-            else: desv_s = None; st.write("")
+            else: st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if desv_s is not None:
-                if -0.025 <= desv_s <= 0.025: st.success("Cumple ✅")
+                span_s_ok = -0.025 <= desv_s <= 0.025
+                if span_s_ok: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
+
+    # Dictamen Cero y Span
+    if dif_c is not None and desv_s is not None:
+        datos_resumen["Cero y Span"] = "Cumple" if (dif_c_ok and span_s_ok) else "NO CUMPLE"
+    else: datos_resumen["Cero y Span"] = "Sin datos"
 
     st.write("")
     st.selectbox("¿Se realizó verificación de Scrubber?", ["-", "Sí 🟢", "No 🔴"], key="cs_vs")
@@ -532,6 +566,8 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
             r2 = (np.corrcoef(x_arr, y_arr)[0,1])**2
         except: pass
 
+    cond_m = cond_b = cond_r2 = cond_prom = False
+
     with col_res:
         st.markdown("**Ecuación y Condición**")
         r1, r2_col, r3 = st.columns([1, 1, 1.2])
@@ -543,20 +579,35 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
             st.write(f"{r2:.8f}" if r2 is not None else "-")
         with r3:
             if m is not None:
-                if 0.98 <= m <= 1.02: st.success("Cumple")
+                cond_m = 0.98 <= m <= 1.02
+                cond_b = -2.0 <= b <= 2.0
+                cond_r2 = 0.99 <= r2 <= 1.0
+                if cond_m: st.success("Cumple")
                 else: st.error("NO CUMPLE")
-                if -2.0 <= b <= 2.0: st.success("Cumple")
+                if cond_b: st.success("Cumple")
                 else: st.error("NO CUMPLE")
-                if 0.99 <= r2 <= 1.0: st.success("Cumple")
+                if cond_r2: st.success("Cumple")
                 else: st.error("NO CUMPLE")
             else: st.write("") 
             
         st.markdown("**Condición Promedio**")
         if promedio is not None:
-            if -0.025 <= promedio <= 0.025: st.success("Cumple ✅")
+            cond_prom = -0.025 <= promedio <= 0.025
+            if cond_prom: st.success("Cumple ✅")
             else: st.error("NO CUMPLE ❌")
 
     st.write("---")
+    # Dictamen Multipunto
+    if len(x_vals) > 0:
+        cond_puntos = len(x_vals) == 5
+        if cond_m and cond_b and cond_r2 and cond_prom and cond_puntos:
+            st.success("✅ **CALIBRACIÓN MULTIPUNTO APROBADA**")
+            datos_resumen["Calibración Multipunto"] = "Cumple"
+        else:
+            st.error("❌ **CALIBRACIÓN MULTIPUNTO RECHAZADA**")
+            datos_resumen["Calibración Multipunto"] = "NO CUMPLE"
+    else: datos_resumen["Calibración Multipunto"] = "Sin datos"
+
     col_graf, col_texto = st.columns([1.5, 1])
     with col_graf:
         if len(x_vals) > 1:
@@ -580,8 +631,8 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
     with c2: st.write("**Estado**")
-    with c3: st.write("**Limpieza**")
-    with c4: st.write("**Reemplazo**")
+    with c3: st.markdown("<div title='Indique si se realizó la limpieza de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Limpieza ℹ️</b></div>", unsafe_allow_html=True)
+    with c4: st.markdown("<div title='Indique si se realizó un reemplazo de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Reemplazo ℹ️</b></div>", unsafe_allow_html=True)
     with c5: st.write("**Observaciones**")
 
     if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)"]:
@@ -606,24 +657,23 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
 # 10. RESUMEN Y FIRMAS
 # ==========================================
 with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
-    st.markdown("**Observaciones Generales**")
-    st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
-    st.markdown("**Conclusiones**")
-    st.text_area("Conclusiones", placeholder="Mencionar conclusiones...", label_visibility="collapsed", key="res_conc")
+    # Formato fiel a la solicitud (títulos exactos y visibles)
+    obs_gen = st.text_area("Observaciones Generales", placeholder="Mencionar anomalías...", label_visibility="visible", key="res_obs")
+    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="visible", key="res_conc")
 
     st.write("")
     c1, c2 = st.columns(2)
     with c1:
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
-        st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
+        emp_tec = st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
+        nom_tec = st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
     with c2:
-        st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
-        st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
+        emp_sup = st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
+        nom_sup = st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
 
 st.divider()
 
 # ==========================================
-# BOTÓN DE IMPRESIÓN (PDF NATIVO DIRECTO)
+# BOTÓN DE IMPRESIÓN (PDF NATIVO DIRECTO COMPRIMIDO)
 # ==========================================
 components.html(
     """
