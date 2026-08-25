@@ -127,6 +127,10 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
 
+        datos_resumen["Estación"] = estacion_sel
+        datos_resumen["Gas Calibrado"] = gas_sel
+        datos_resumen["Número de Serie"] = num_serie_val
+
     with col_der:
         st.markdown("#### ")
         col_ini, col_fin = st.columns(2)
@@ -137,6 +141,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
             st.number_input("Temp exterior (C°) - Ini", value=0.0)
             st.number_input("Temp interior (C°) - Ini", value=0.0)
             st.number_input("Presión ambiental (Torr) - Ini", value=634.0)
+            datos_resumen["Fecha de Servicio"] = str(fecha_ref)
 
         with col_fin:
             st.markdown("### Final")
@@ -695,11 +700,11 @@ with c_excel:
         # DEFINICIÓN DE FORMATOS (Estilo SIMAJ)
         f_titulo = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#00B2A9', 'align': 'center', 'valign': 'vcenter'})
         f_seccion = workbook.add_format({'bold': True, 'bg_color': '#F37021', 'font_color': 'white', 'border': 1, 'align': 'center'})
-        f_etiqueta = workbook.add_format({'bold': True, 'bg_color': '#F2F2F2', 'border': 1})
-        f_valor = workbook.add_format({'border': 1, 'align': 'center'})
+        f_etiqueta = workbook.add_format({'bold': True, 'bg_color': '#F2F2F2', 'border': 1, 'valign': 'vcenter'})
+        f_valor = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
         f_texto_largo = workbook.add_format({'border': 1, 'align': 'left', 'valign': 'top', 'text_wrap': True})
-        f_bien = workbook.add_format({'border': 1, 'bg_color': '#d4edda', 'font_color': '#155724', 'bold': True, 'align': 'center'})
-        f_mal = workbook.add_format({'border': 1, 'bg_color': '#f8d7da', 'font_color': '#721c24', 'bold': True, 'align': 'center'})
+        f_bien = workbook.add_format({'border': 1, 'bg_color': '#d4edda', 'font_color': '#155724', 'bold': True, 'align': 'center', 'valign': 'vcenter'})
+        f_mal = workbook.add_format({'border': 1, 'bg_color': '#f8d7da', 'font_color': '#721c24', 'bold': True, 'align': 'center', 'valign': 'vcenter'})
         
         # CONFIGURACIÓN DE PÁGINA Y COLUMNAS
         worksheet.set_column('B:B', 35)
@@ -748,14 +753,22 @@ with c_excel:
         worksheet.write(f'C{fila}', obs_gen, f_texto_largo); worksheet.set_row(fila-1, 40); fila += 1
         worksheet.write(f'B{fila}', "Conclusiones", f_etiqueta)
         worksheet.write(f'C{fila}', conclusiones, f_texto_largo); worksheet.set_row(fila-1, 40); fila += 1
+        
+        # Firmas Técnico
         worksheet.write(f'B{fila}', "Empresa / Institución (Técnico)", f_etiqueta)
         worksheet.write(f'C{fila}', emp_tec, f_valor); fila += 1
         worksheet.write(f'B{fila}', "Técnico", f_etiqueta)
         worksheet.write(f'C{fila}', nom_tec, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Firma Técnico", f_etiqueta)
+        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1 # Altura para firma
+        
+        # Firmas Supervisor
         worksheet.write(f'B{fila}', "Empresa / Institución (Supervisor)", f_etiqueta)
         worksheet.write(f'C{fila}', emp_sup, f_valor); fila += 1
         worksheet.write(f'B{fila}', "Supervisor", f_etiqueta)
         worksheet.write(f'C{fila}', nom_sup, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Firma Supervisor", f_etiqueta)
+        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1 # Altura para firma
 
         workbook.close()
         
