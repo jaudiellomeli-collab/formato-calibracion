@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import io
 import os
+import xlsxwriter
 
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
 
@@ -96,7 +97,7 @@ else: # SO2
     flujo_ideal_vol = 700
     flujo_tol = 0.025
     cero_tol = 0.003
-    puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001] # 0.0001 para SO2
+    puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]
     span_gen_default = 0.400
 
 st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
@@ -149,7 +150,6 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
         estacion_sel = st.selectbox("Estación:", estaciones)
         
-        # Ajuste de fabricante y modelo específico
         fab_final = "ACOEM"
         mod_final = modelo_analizador
         
@@ -665,23 +665,72 @@ with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
 
 st.divider()
 
-# Botones finales
+# BOTONES FINALES
 c_print, c_excel = st.columns(2)
 with c_print:
     st.markdown("<p style='text-align: center; color: gray;'>Presiona <b>Ctrl + P</b> para guardar el PDF nativo.</p>", unsafe_allow_html=True)
 
 with c_excel:
     try:
-        df_resumen = pd.DataFrame(list(datos_resumen.items()), columns=["Parámetro", "Estado / Valor"])
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_resumen.to_excel(writer, index=False, sheet_name='Resumen')
+        workbook = xlsxwriter.Workbook(buffer, {'in_memory': True})
+        worksheet = workbook.add_worksheet('Reporte Ejecutivo')
+        
+        # DEFINICIÓN DE FORMATOS (Estilo SIMAJ)
+        f_titulo = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#00B2A9', 'align': 'center', 'valign': 'vcenter'})
+        f_seccion = workbook.add_format({'bold': True, 'bg_color': '#F37021', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        f_etiqueta = workbook.add_format({'bold': True, 'bg_color': '#F2F2F2', 'border': 1})
+        f_valor = workbook.add_format({'border': 1, 'align': 'center'})
+        f_bien = workbook.add_format({'border': 1, 'bg_color': '#d4edda', 'font_color': '#155724', 'bold': True, 'align': 'center'})
+        f_mal = workbook.add_format({'border': 1, 'bg_color': '#f8d7da', 'font_color': '#721c24', 'bold': True, 'align': 'center'})
+        
+        # CONFIGURACIÓN DE PÁGINA Y COLUMNAS
+        worksheet.set_column('B:B', 30)
+        worksheet.set_column('C:C', 35)
+        
+        # LOGO Y TÍTULO
+        if os.path.exists("simaj.png"):
+            worksheet.insert_image('B2', 'simaj.png', {'x_scale': 0.4, 'y_scale': 0.4, 'x_offset': 10, 'y_offset': 5})
+        
+        worksheet.merge_range('B2:C4', f"REPORTE EJECUTIVO DE CALIBRACIÓN\n{gas_sel}", f_titulo)
+        worksheet.set_row(1, 30)
+        
+        # DATOS GENERALES
+        worksheet.merge_range('B6:C6', "📋 DATOS GENERALES DEL EQUIPO", f_seccion)
+        worksheet.write('B7', "Estación", f_etiqueta)
+        worksheet.write('C7', estacion_sel, f_valor)
+        worksheet.write('B8', "Gas", f_etiqueta)
+        worksheet.write('C8', gas_sel, f_valor)
+        worksheet.write('B9', "Modelo", f_etiqueta)
+        worksheet.write('C9', mod_final, f_valor)
+        worksheet.write('B10', "Número de Serie", f_etiqueta)
+        worksheet.write('C10', num_serie_val, f_valor)
+        worksheet.write('B11', "Fecha de Servicio", f_etiqueta)
+        worksheet.write('C11', str(fecha_ref), f_valor)
+        
+        # DICTÁMENES
+        worksheet.merge_range('B13:C13', "✅ DICTÁMENES TÉCNICOS", f_seccion)
+        
+        fila_actual = 14
+        for key, val in datos_resumen.items():
+            if key in ["Estación", "Gas Calibrado", "Número de Serie", "Fecha de Servicio"]: continue
+            
+            worksheet.write(f'B{fila_actual}', key, f_etiqueta)
+            if val in ["Cumple", "Aprobada", "No"]: # "No requiere ajuste" es positivo
+                worksheet.write(f'C{fila_actual}', str(val), f_bien)
+            elif val in ["NO CUMPLE", "Rechazada", "SÍ"]: # "SÍ requiere ajuste" es negativo
+                worksheet.write(f'C{fila_actual}', str(val), f_mal)
+            else:
+                worksheet.write(f'C{fila_actual}', str(val), f_valor)
+            fila_actual += 1
+
+        workbook.close()
         
         st.download_button(
-            label="📥 Descargar Resumen en Excel",
+            label="📥 Descargar Reporte Formateado en Excel",
             data=buffer.getvalue(),
-            file_name=f"Resumen_Calibracion_{gas_sel[:3]}_{estacion_sel}_{fecha_ref}.xlsx",
-            mime="application/vnd.ms-excel"
+            file_name=f"Reporte_{gas_sel[:3]}_{estacion_sel}_{fecha_ref}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     except Exception as e:
-        st.warning(f"Asegúrate de agregar 'xlsxwriter' a tu archivo requirements.txt en GitHub para habilitar la descarga de Excel.")
+        st.error(f"Error generando Excel: {e}")
