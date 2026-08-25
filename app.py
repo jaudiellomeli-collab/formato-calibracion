@@ -21,7 +21,7 @@ st.markdown("""
     .stAlert { border-left: 5px solid #00B2A9 !important; background-color: #f0fdfa !important; }
     div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
     
-    /* COMPRESOR EXTREMO PARA EL PDF (Reduce de 9 hojas a 2-3) */
+    /* COMPRESOR EXTREMO PARA EL PDF */
     @media print {
         @page { size: letter portrait; margin: 0.5cm; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -36,13 +36,11 @@ st.markdown("""
             height: auto !important; overflow: visible !important; position: static !important;
         }
         
-        /* Reducir espacios y márgenes a cero */
         .main .block-container { max-width: 100% !important; padding: 0 !important; }
         [data-testid="column"] { padding: 0 4px !important; }
         [data-testid="stVerticalBlock"] { gap: 0 !important; }
         div[data-testid="stHorizontalBlock"] { gap: 0.5em !important; }
         
-        /* Comprimir Inputs y Selects */
         input[type="text"], input[type="number"], textarea {
             font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
         }
@@ -50,10 +48,7 @@ st.markdown("""
             font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
         }
         
-        /* Esconder íconos innecesarios en el papel */
         .stSelectbox svg, .stExpander > details > summary > svg { display: none !important; }
-        
-        /* Ajustar expanders */
         .stExpander { border: none !important; border-bottom: 1px solid #ddd !important; margin-bottom: 2px !important; page-break-inside: avoid; }
         .stExpander summary { padding: 2px 0 !important; min-height: 0 !important; }
         details:not([open]) { display: none !important; }
@@ -94,6 +89,12 @@ elif gas_sel == "Monóxido de Carbono (CO)":
 else: # SO2
     equipos_act = equipos_so2; modelo_analizador = "Serinus 50"; flujo_ideal_vol = 700; flujo_tol = 0.025; cero_tol = 0.003
     puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
+
+# ==========================================
+# ENCABEZADO Y LOGO PRINCIPAL
+# ==========================================
+if os.path.exists("simaj.png"):
+    st.image("simaj.png", width=250)
 
 st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
 st.subheader("Analizadores de Gases")
@@ -156,6 +157,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0)
         
+        # LÓGICA CONDICIONAL DE FALLA
         falla = st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
         if falla == "Sí 🔴":
             st.text_area("Descripción de Falla o Alarma", placeholder="Mencionar falla, alarma o anormalidad...")
@@ -287,7 +289,8 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
 
     if len(resultados_pg) > 0:
         datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
-    else: datos_resumen["Parámetros Generales"] = "Sin datos"
+    else:
+        datos_resumen["Parámetros Generales"] = "Sin datos"
 
 # ==========================================
 # 4. VERIFICACIÓN Y AJUSTE DE FLUJO
@@ -362,7 +365,8 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
     elif flujo_vol_verif is not None:
         d_v = (flujo_vol_verif - flujo_ideal_vol) / flujo_ideal_vol
         datos_resumen["Ajuste de Flujo"] = "Cumple" if (-flujo_tol <= d_v <= flujo_tol) else "NO CUMPLE"
-    else: datos_resumen["Ajuste de Flujo"] = "Sin datos"
+    else:
+        datos_resumen["Ajuste de Flujo"] = "Sin datos"
 
 # ==========================================
 # 5. REVISIÓN BÁSICA DE COMPONENTES
@@ -371,7 +375,6 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
     with c2: st.write("**Estado**")
-    # LEYENDAS INYECTADAS AQUÍ
     with c3: st.markdown("<div title='Indique si se realizó la limpieza de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Limpieza ℹ️</b></div>", unsafe_allow_html=True)
     with c4: st.markdown("<div title='Indique si se realizó un reemplazo de este componente (Seleccione Sí o No)' style='cursor:help;'><b>Reemplazo ℹ️</b></div>", unsafe_allow_html=True)
     with c5: st.write("**Observaciones**")
@@ -473,14 +476,13 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             if resp_c is not None:
                 dif_c = resp_c - val_cg
                 st.write(f"**{dif_c:.4f}**")
-            else: st.write("")
+            else: dif_c = None; st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if dif_c is not None:
-                dif_c_ok = -cero_tol <= dif_c <= cero_tol
-                if dif_c_ok: st.success("Cumple ✅")
+                if -cero_tol <= dif_c <= cero_tol: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
 
     with col_cs_span:
@@ -496,20 +498,22 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             if resp_s is not None and val_sg != 0:
                 desv_s = (resp_s - val_sg) / val_sg
                 st.write(f"**{desv_s * 100:.2f}%**")
-            else: st.write("")
+            else: desv_s = None; st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if desv_s is not None:
-                span_s_ok = -0.025 <= desv_s <= 0.025
-                if span_s_ok: st.success("Cumple ✅")
+                if -0.025 <= desv_s <= 0.025: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
 
     # Dictamen Cero y Span
     if dif_c is not None and desv_s is not None:
+        dif_c_ok = -cero_tol <= dif_c <= cero_tol
+        span_s_ok = -0.025 <= desv_s <= 0.025
         datos_resumen["Cero y Span"] = "Cumple" if (dif_c_ok and span_s_ok) else "NO CUMPLE"
-    else: datos_resumen["Cero y Span"] = "Sin datos"
+    else:
+        datos_resumen["Cero y Span"] = "Sin datos"
 
     st.write("")
     st.selectbox("¿Se realizó verificación de Scrubber?", ["-", "Sí 🟢", "No 🔴"], key="cs_vs")
@@ -606,7 +610,8 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
         else:
             st.error("❌ **CALIBRACIÓN MULTIPUNTO RECHAZADA**")
             datos_resumen["Calibración Multipunto"] = "NO CUMPLE"
-    else: datos_resumen["Calibración Multipunto"] = "Sin datos"
+    else:
+        datos_resumen["Calibración Multipunto"] = "Sin datos"
 
     col_graf, col_texto = st.columns([1.5, 1])
     with col_graf:
@@ -657,18 +662,19 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
 # 10. RESUMEN Y FIRMAS
 # ==========================================
 with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
-    # Formato fiel a la solicitud (títulos exactos y visibles)
-    obs_gen = st.text_area("Observaciones Generales", placeholder="Mencionar anomalías...", label_visibility="visible", key="res_obs")
-    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="visible", key="res_conc")
+    st.markdown("**Observaciones Generales**")
+    st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
+    st.markdown("**Conclusiones**")
+    st.text_area("Conclusiones", placeholder="Mencionar conclusiones...", label_visibility="collapsed", key="res_conc")
 
     st.write("")
     c1, c2 = st.columns(2)
     with c1:
-        emp_tec = st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
-        nom_tec = st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
+        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
+        st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
     with c2:
-        emp_sup = st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
-        nom_sup = st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
+        st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
+        st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
 
 st.divider()
 
