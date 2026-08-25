@@ -289,7 +289,6 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
         fila_libre("Valor de la ganancia", "-", "-", "so2_gan")
         fila_regla("Valor de ajuste POT lámpara", "-", "10-100", 10.0, 100.0, "so2_pot")
 
-    # Dictamen de Parámetros Generales
     if len(resultados_pg) > 0:
         datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
     else:
@@ -671,9 +670,10 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
 # 11. RESUMEN Y EXPORTACIÓN A EXCEL
 # ==========================================
 with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
-    # Formato fiel a la solicitud (títulos exactos y visibles)
-    obs_gen = st.text_area("Observaciones Generales", placeholder="Mencionar anomalías...", label_visibility="visible", key="res_obs")
-    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="visible", key="res_conc")
+    st.write("**Observaciones Generales**")
+    obs_gen = st.text_area("obs", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
+    st.write("**Conclusiones**")
+    conclusiones = st.text_area("conc", placeholder="Mencionar si cumplen criterio...", label_visibility="collapsed", key="res_conc")
 
     st.write("")
     c1, c2 = st.columns(2)
@@ -681,7 +681,7 @@ with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
         emp_tec = st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
         nom_tec = st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
     with c2:
-        emp_sup = st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup") # Espacio extra para no duplicar ID
+        emp_sup = st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
         nom_sup = st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
 
 st.divider()
@@ -697,25 +697,29 @@ with c_excel:
         workbook = xlsxwriter.Workbook(buffer, {'in_memory': True})
         worksheet = workbook.add_worksheet('Reporte Ejecutivo')
         
-        # DEFINICIÓN DE FORMATOS (Estilo SIMAJ)
+        # DEFINICIÓN DE FORMATOS
         f_titulo = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#00B2A9', 'align': 'center', 'valign': 'vcenter'})
-        f_seccion = workbook.add_format({'bold': True, 'bg_color': '#F37021', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        f_seccion = workbook.add_format({'bold': True, 'bg_color': '#F37021', 'font_color': 'white', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
         f_etiqueta = workbook.add_format({'bold': True, 'bg_color': '#F2F2F2', 'border': 1, 'valign': 'vcenter'})
         f_valor = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
         f_texto_largo = workbook.add_format({'border': 1, 'align': 'left', 'valign': 'top', 'text_wrap': True})
         f_bien = workbook.add_format({'border': 1, 'bg_color': '#d4edda', 'font_color': '#155724', 'bold': True, 'align': 'center', 'valign': 'vcenter'})
         f_mal = workbook.add_format({'border': 1, 'bg_color': '#f8d7da', 'font_color': '#721c24', 'bold': True, 'align': 'center', 'valign': 'vcenter'})
         
-        # CONFIGURACIÓN DE PÁGINA Y COLUMNAS
+        # CONFIGURACIÓN DE COLUMNAS
+        worksheet.set_column('A:A', 2) # Margen izquierdo
         worksheet.set_column('B:B', 35)
         worksheet.set_column('C:C', 45)
         
-        # LOGO Y TÍTULO
+        # LOGO (Fila 2 - Se crea una fila alta dedicada solo para que la imagen no estorbe)
+        worksheet.set_row(1, 60)
         if os.path.exists("simaj.png"):
-            worksheet.insert_image('B2', 'simaj.png', {'x_scale': 0.4, 'y_scale': 0.4, 'x_offset': 10, 'y_offset': 5})
+            worksheet.insert_image('B2', 'simaj.png', {'x_scale': 0.18, 'y_scale': 0.18, 'x_offset': 10, 'y_offset': 5})
         
-        worksheet.merge_range('B2:C4', f"REPORTE EJECUTIVO DE CALIBRACIÓN\n{gas_sel}", f_titulo)
-        worksheet.set_row(1, 30)
+        # TÍTULO (Fila 3 y 4)
+        worksheet.merge_range('B3:C4', f"REPORTE EJECUTIVO DE CALIBRACIÓN\n{gas_sel}", f_titulo)
+        worksheet.set_row(2, 20)
+        worksheet.set_row(3, 20)
         
         # 1. DATOS GENERALES
         fila = 6
@@ -731,17 +735,20 @@ with c_excel:
         fila += 1
         
         dictamenes = [
-            ("Parámetros Generales", datos_resumen["Parámetros Generales"]),
-            ("Ajuste de Flujo", datos_resumen["Ajuste de Flujo"]),
-            ("Cero y Span", datos_resumen["Cero y Span"]),
-            ("Calibración Multipunto", datos_resumen["Calibración Multipunto"])
+            ("Parámetros Generales", datos_resumen.get("Parámetros Generales", "Sin datos")),
+            ("Ajuste de Flujo", datos_resumen.get("Ajuste de Flujo", "Sin datos")),
+            ("Cero y Span", datos_resumen.get("Cero y Span", "Sin datos")),
+            ("Calibración Multipunto", datos_resumen.get("Calibración Multipunto", "Sin datos"))
         ]
         
         for nombre, resultado in dictamenes:
             worksheet.write(f'B{fila}', nombre, f_etiqueta)
-            if resultado == "Cumple": worksheet.write(f'C{fila}', "Cumple", f_bien)
-            elif resultado == "NO CUMPLE": worksheet.write(f'C{fila}', "NO CUMPLE", f_mal)
-            else: worksheet.write(f'C{fila}', resultado, f_valor)
+            if resultado in ["Cumple", "Aprobada", "No"]: 
+                worksheet.write(f'C{fila}', "Cumple", f_bien)
+            elif resultado in ["NO CUMPLE", "Rechazada", "SÍ"]: 
+                worksheet.write(f'C{fila}', "NO CUMPLE", f_mal)
+            else: 
+                worksheet.write(f'C{fila}', resultado, f_valor)
             fila += 1
             
         fila += 1
@@ -760,7 +767,7 @@ with c_excel:
         worksheet.write(f'B{fila}', "Técnico", f_etiqueta)
         worksheet.write(f'C{fila}', nom_tec, f_valor); fila += 1
         worksheet.write(f'B{fila}', "Firma Técnico", f_etiqueta)
-        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1 # Altura para firma
+        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1
         
         # Firmas Supervisor
         worksheet.write(f'B{fila}', "Empresa / Institución (Supervisor)", f_etiqueta)
@@ -768,7 +775,7 @@ with c_excel:
         worksheet.write(f'B{fila}', "Supervisor", f_etiqueta)
         worksheet.write(f'C{fila}', nom_sup, f_valor); fila += 1
         worksheet.write(f'B{fila}', "Firma Supervisor", f_etiqueta)
-        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1 # Altura para firma
+        worksheet.write(f'C{fila}', "", f_valor); worksheet.set_row(fila-1, 60); fila += 1
 
         workbook.close()
         
