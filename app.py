@@ -104,44 +104,6 @@ st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
 st.subheader("Analizadores de Gases")
 
 # ==========================================
-# FUNCIONES AUXILIARES GLOBALES
-# ==========================================
-def evaluar_y_mostrar(val, min_val, max_val):
-    if val is None: st.write("")
-    elif min_val <= val <= max_val: st.success("Cumple ✅")
-    else: st.error("NO CUMPLE ❌")
-
-def fila_regla(param, unit, ideal_str, min_val, max_val, key):
-    c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
-    with c1: st.write(param)
-    with c2: st.write(unit)
-    with c3: st.write(ideal_str)
-    with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
-    with c5: evaluar_y_mostrar(val_ini, min_val, max_val)
-    with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
-    with c7: evaluar_y_mostrar(val_fin, min_val, max_val)
-    return val_ini, val_fin 
-
-def fila_libre(param, unit, ideal_str, key):
-    c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
-    with c1: st.write(param)
-    with c2: st.write(unit)
-    with c3: st.write(ideal_str)
-    with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
-    with c5: st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
-    with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
-    with c7: st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
-    return val_ini, val_fin
-
-def fila_comp(nombre, key, placeholder="Especificar detalles..."):
-    c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
-    with c1: st.write(nombre)
-    with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-    with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
-    with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
-    with c5: st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
-
-# ==========================================
 # 1. DATOS DEL ANALIZADOR
 # ==========================================
 with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded=True):
@@ -164,10 +126,6 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         num_serie_val = equipos_act.get(estacion_sel, "")
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
-        
-        datos_resumen["Estación"] = estacion_sel
-        datos_resumen["Gas Calibrado"] = gas_sel
-        datos_resumen["Número de Serie"] = num_serie_val
 
     with col_der:
         st.markdown("#### ")
@@ -179,7 +137,6 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
             st.number_input("Temp exterior (C°) - Ini", value=0.0)
             st.number_input("Temp interior (C°) - Ini", value=0.0)
             st.number_input("Presión ambiental (Torr) - Ini", value=634.0)
-            datos_resumen["Fecha de Servicio"] = str(fecha_ref)
 
         with col_fin:
             st.markdown("### Final")
@@ -239,6 +196,40 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
     with h6: st.write("**Final**")
     with h7: st.write("**Comentarios**")
 
+    resultados_pg = []
+
+    def evaluar_y_mostrar(val, min_val, max_val):
+        if val is None: 
+            st.write("")
+        elif min_val <= val <= max_val: 
+            st.success("Cumple ✅")
+            resultados_pg.append(True)
+        else: 
+            st.error("NO CUMPLE ❌")
+            resultados_pg.append(False)
+
+    def fila_regla(param, unit, ideal_str, min_val, max_val, key):
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
+        with c1: st.write(param)
+        with c2: st.write(unit)
+        with c3: st.write(ideal_str)
+        with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
+        with c5: evaluar_y_mostrar(val_ini, min_val, max_val)
+        with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
+        with c7: evaluar_y_mostrar(val_fin, min_val, max_val)
+        return val_ini, val_fin 
+
+    def fila_libre(param, unit, ideal_str, key):
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
+        with c1: st.write(param)
+        with c2: st.write(unit)
+        with c3: st.write(ideal_str)
+        with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
+        with c5: st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
+        with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
+        with c7: st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
+        return val_ini, val_fin
+
     if gas_sel == "Ozono (O3)":
         fila_libre("Flujo Estándar", "cc/min", "500", "o3_f_est")
         fila_regla("Flujo Volumétrico", "cc/min", "500", 487.5, 512.5, "o3_f_vol") 
@@ -292,6 +283,12 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
         fila_regla("Temperatura del bloque", "°C", "50", 45.0, 55.0, "so2_t_bloq")
         fila_libre("Valor de la ganancia", "-", "-", "so2_gan")
         fila_regla("Valor de ajuste POT lámpara", "-", "10-100", 10.0, 100.0, "so2_pot")
+
+    # Dictamen de Parámetros Generales
+    if len(resultados_pg) > 0:
+        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
+    else:
+        datos_resumen["Parámetros Generales"] = "Sin datos"
 
 # ==========================================
 # 5. VERIFICACIÓN Y AJUSTE DE FLUJO
@@ -353,17 +350,17 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
         return val
 
     flujo_vol_verif = render_tabla_flujo("Verificación", "verif")
-    
-    req_ajuste_final = ""
-    if flujo_vol_verif is not None:
-        d_v = (flujo_vol_verif - flujo_ideal_vol) / flujo_ideal_vol
-        req_ajuste_final = "No" if (-flujo_tol <= d_v <= flujo_tol) else "SÍ"
-        
-    st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
-    st.caption(f"*La condición se cumple cuando la desviación es menor o igual a ±{flujo_tol*100}%")
-
     flujo_vol_ajus = render_tabla_flujo("Ajuste", "ajus")
-    datos_resumen["Verific. Flujo Volumétrico"] = req_ajuste_final
+
+    # Dictamen de Flujo
+    if flujo_vol_ajus is not None:
+        d_a = (flujo_vol_ajus - flujo_ideal_vol) / flujo_ideal_vol
+        datos_resumen["Ajuste de Flujo"] = "Cumple" if (-flujo_tol <= d_a <= flujo_tol) else "NO CUMPLE"
+    elif flujo_vol_verif is not None:
+        d_v = (flujo_vol_verif - flujo_ideal_vol) / flujo_ideal_vol
+        datos_resumen["Ajuste de Flujo"] = "Cumple" if (-flujo_tol <= d_v <= flujo_tol) else "NO CUMPLE"
+    else:
+        datos_resumen["Ajuste de Flujo"] = "Sin datos"
 
 # ==========================================
 # 6. REVISIÓN BÁSICA DE COMPONENTES
@@ -375,6 +372,14 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
     with c3: st.write("**Limpieza**")
     with c4: st.write("**Reemplazo**")
     with c5: st.write("**Observaciones**")
+
+    def fila_comp(nombre, key, placeholder="Especificar detalles..."):
+        c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
+        with c1: st.write(nombre)
+        with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
+        with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
+        with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
+        with c5: st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
 
     if gas_sel == "Ozono (O3)":
         fila_comp("Lámpara UV (revisión electrónica)", "b_lamp")
@@ -458,6 +463,9 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             with c3: st.write("min")
 
     col_cs_cero, col_cs_span = st.columns(2)
+    dif_c_ok = span_s_ok = False
+    dif_c = desv_s = None
+    
     with col_cs_cero:
         st.markdown("#### Concentración Cero")
         c1, c2, c3 = st.columns(3)
@@ -465,22 +473,21 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
         with c2: st.write("**Analizador**")
         with c3: st.write("**Dif**")
         c1, c2, c3 = st.columns(3)
-        
         cero_gen_default = 0.0001 if gas_sel == "Dióxido de Azufre (SO2)" else 0.001
-        
         with c1: val_cg = st.number_input("Cero Gen", value=cero_gen_default, disabled=True, key="vcg")
         with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
         with c3:
             if resp_c is not None:
                 dif_c = resp_c - val_cg
                 st.write(f"**{dif_c:.4f}**")
-            else: dif_c = None; st.write("")
+            else: st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if dif_c is not None:
-                if -cero_tol <= dif_c <= cero_tol: st.success("Cumple ✅")
+                dif_c_ok = -cero_tol <= dif_c <= cero_tol
+                if dif_c_ok: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
 
     with col_cs_span:
@@ -496,15 +503,21 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
             if resp_s is not None and val_sg != 0:
                 desv_s = (resp_s - val_sg) / val_sg
                 st.write(f"**{desv_s * 100:.2f}%**")
-            else: desv_s = None; st.write("")
+            else: st.write("")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("")
         with c2: st.write("**Cond**")
         with c3:
             if desv_s is not None:
-                if -0.025 <= desv_s <= 0.025: st.success("Cumple ✅")
+                span_s_ok = -0.025 <= desv_s <= 0.025
+                if span_s_ok: st.success("Cumple ✅")
                 else: st.error("NO CUMPLE ❌")
-                datos_resumen["Verificación Cero-Span"] = "Cumple" if (-0.025 <= desv_s <= 0.025) else "Rechazada"
+
+    # Dictamen Cero y Span
+    if dif_c is not None and desv_s is not None:
+        datos_resumen["Cero y Span"] = "Cumple" if (dif_c_ok and span_s_ok) else "NO CUMPLE"
+    else:
+        datos_resumen["Cero y Span"] = "Sin datos"
 
     st.write("")
     st.selectbox("¿Se realizó verificación de Scrubber?", ["-", "Sí 🟢", "No 🔴"], key="cs_vs")
@@ -595,14 +608,17 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
             else: st.error("NO CUMPLE ❌")
 
     st.write("---")
+    # Dictamen Multipunto
     if len(x_vals) > 0:
         cond_puntos = len(x_vals) == 5
         if cond_m and cond_b and cond_r2 and cond_prom and cond_puntos:
             st.success("✅ **CALIBRACIÓN MULTIPUNTO APROBADA**")
-            datos_resumen["Calibración Multipunto"] = "Aprobada"
+            datos_resumen["Calibración Multipunto"] = "Cumple"
         else:
             st.error("❌ **CALIBRACIÓN MULTIPUNTO RECHAZADA**")
-            datos_resumen["Calibración Multipunto"] = "Rechazada"
+            datos_resumen["Calibración Multipunto"] = "NO CUMPLE"
+    else:
+        datos_resumen["Calibración Multipunto"] = "Sin datos"
 
     col_graf, col_texto = st.columns([1.5, 1])
     with col_graf:
@@ -650,18 +666,18 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
 # 11. RESUMEN Y EXPORTACIÓN A EXCEL
 # ==========================================
 with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
-    st.markdown("**Observaciones Generales**")
-    st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
-    st.markdown("**Conclusiones**")
-    st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="collapsed", key="res_conc")
+    # Formato fiel a la solicitud (títulos exactos y visibles)
+    obs_gen = st.text_area("Observaciones Generales", placeholder="Mencionar anomalías...", label_visibility="visible", key="res_obs")
+    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="visible", key="res_conc")
 
+    st.write("")
     c1, c2 = st.columns(2)
     with c1:
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
-        st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
+        emp_tec = st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
+        nom_tec = st.text_input("Técnico", value="José Alfredo Jiménez Ramos", key="n_tec")
     with c2:
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
-        st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
+        emp_sup = st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup") # Espacio extra para no duplicar ID
+        nom_sup = st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
 
 st.divider()
 
@@ -681,12 +697,13 @@ with c_excel:
         f_seccion = workbook.add_format({'bold': True, 'bg_color': '#F37021', 'font_color': 'white', 'border': 1, 'align': 'center'})
         f_etiqueta = workbook.add_format({'bold': True, 'bg_color': '#F2F2F2', 'border': 1})
         f_valor = workbook.add_format({'border': 1, 'align': 'center'})
+        f_texto_largo = workbook.add_format({'border': 1, 'align': 'left', 'valign': 'top', 'text_wrap': True})
         f_bien = workbook.add_format({'border': 1, 'bg_color': '#d4edda', 'font_color': '#155724', 'bold': True, 'align': 'center'})
         f_mal = workbook.add_format({'border': 1, 'bg_color': '#f8d7da', 'font_color': '#721c24', 'bold': True, 'align': 'center'})
         
         # CONFIGURACIÓN DE PÁGINA Y COLUMNAS
-        worksheet.set_column('B:B', 30)
-        worksheet.set_column('C:C', 35)
+        worksheet.set_column('B:B', 35)
+        worksheet.set_column('C:C', 45)
         
         # LOGO Y TÍTULO
         if os.path.exists("simaj.png"):
@@ -695,39 +712,55 @@ with c_excel:
         worksheet.merge_range('B2:C4', f"REPORTE EJECUTIVO DE CALIBRACIÓN\n{gas_sel}", f_titulo)
         worksheet.set_row(1, 30)
         
-        # DATOS GENERALES
-        worksheet.merge_range('B6:C6', "📋 DATOS GENERALES DEL EQUIPO", f_seccion)
-        worksheet.write('B7', "Estación", f_etiqueta)
-        worksheet.write('C7', estacion_sel, f_valor)
-        worksheet.write('B8', "Gas", f_etiqueta)
-        worksheet.write('C8', gas_sel, f_valor)
-        worksheet.write('B9', "Modelo", f_etiqueta)
-        worksheet.write('C9', mod_final, f_valor)
-        worksheet.write('B10', "Número de Serie", f_etiqueta)
-        worksheet.write('C10', num_serie_val, f_valor)
-        worksheet.write('B11', "Fecha de Servicio", f_etiqueta)
-        worksheet.write('C11', str(fecha_ref), f_valor)
+        # 1. DATOS GENERALES
+        fila = 6
+        worksheet.merge_range(f'B{fila}:C{fila}', "📋 DATOS GENERALES DEL EQUIPO", f_seccion)
+        fila += 1
+        worksheet.write(f'B{fila}', "Estación", f_etiqueta); worksheet.write(f'C{fila}', estacion_sel, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Gas Calibrado", f_etiqueta); worksheet.write(f'C{fila}', gas_sel, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Número de Serie", f_etiqueta); worksheet.write(f'C{fila}', num_serie_val, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Fecha de Servicio", f_etiqueta); worksheet.write(f'C{fila}', str(fecha_ref), f_valor); fila += 2
         
-        # DICTÁMENES
-        worksheet.merge_range('B13:C13', "✅ DICTÁMENES TÉCNICOS", f_seccion)
+        # 2. DICTÁMENES TÉCNICOS
+        worksheet.merge_range(f'B{fila}:C{fila}', "✅ DICTÁMENES TÉCNICOS AUTOMÁTICOS", f_seccion)
+        fila += 1
         
-        fila_actual = 14
-        for key, val in datos_resumen.items():
-            if key in ["Estación", "Gas Calibrado", "Número de Serie", "Fecha de Servicio"]: continue
+        dictamenes = [
+            ("Parámetros Generales", datos_resumen["Parámetros Generales"]),
+            ("Ajuste de Flujo", datos_resumen["Ajuste de Flujo"]),
+            ("Cero y Span", datos_resumen["Cero y Span"]),
+            ("Calibración Multipunto", datos_resumen["Calibración Multipunto"])
+        ]
+        
+        for nombre, resultado in dictamenes:
+            worksheet.write(f'B{fila}', nombre, f_etiqueta)
+            if resultado == "Cumple": worksheet.write(f'C{fila}', "Cumple", f_bien)
+            elif resultado == "NO CUMPLE": worksheet.write(f'C{fila}', "NO CUMPLE", f_mal)
+            else: worksheet.write(f'C{fila}', resultado, f_valor)
+            fila += 1
             
-            worksheet.write(f'B{fila_actual}', key, f_etiqueta)
-            if val in ["Cumple", "Aprobada", "No"]: # "No requiere ajuste" es positivo
-                worksheet.write(f'C{fila_actual}', str(val), f_bien)
-            elif val in ["NO CUMPLE", "Rechazada", "SÍ"]: # "SÍ requiere ajuste" es negativo
-                worksheet.write(f'C{fila_actual}', str(val), f_mal)
-            else:
-                worksheet.write(f'C{fila_actual}', str(val), f_valor)
-            fila_actual += 1
+        fila += 1
+        
+        # 3. OBSERVACIONES Y FIRMAS
+        worksheet.merge_range(f'B{fila}:C{fila}', "📝 OBSERVACIONES Y FIRMAS", f_seccion)
+        fila += 1
+        worksheet.write(f'B{fila}', "Observaciones Generales", f_etiqueta)
+        worksheet.write(f'C{fila}', obs_gen, f_texto_largo); worksheet.set_row(fila-1, 40); fila += 1
+        worksheet.write(f'B{fila}', "Conclusiones", f_etiqueta)
+        worksheet.write(f'C{fila}', conclusiones, f_texto_largo); worksheet.set_row(fila-1, 40); fila += 1
+        worksheet.write(f'B{fila}', "Empresa / Institución (Técnico)", f_etiqueta)
+        worksheet.write(f'C{fila}', emp_tec, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Técnico", f_etiqueta)
+        worksheet.write(f'C{fila}', nom_tec, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Empresa / Institución (Supervisor)", f_etiqueta)
+        worksheet.write(f'C{fila}', emp_sup, f_valor); fila += 1
+        worksheet.write(f'B{fila}', "Supervisor", f_etiqueta)
+        worksheet.write(f'C{fila}', nom_sup, f_valor); fila += 1
 
         workbook.close()
         
         st.download_button(
-            label="📥 Descargar Reporte Formateado en Excel",
+            label="📥 Descargar Reporte Ejecutivo en Excel",
             data=buffer.getvalue(),
             file_name=f"Reporte_{gas_sel[:3]}_{estacion_sel}_{fecha_ref}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
