@@ -9,7 +9,7 @@ import os
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
 
 # ==========================================
-# CSS GLOBAL
+# CSS GLOBAL Y ESTILOS
 # ==========================================
 st.markdown("""
 <style>
@@ -46,6 +46,12 @@ equipos_nox = {
     "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700"
 }
 
+equipos_co = {
+    "Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", 
+    "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", 
+    "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395"
+}
+
 # ==========================================
 # MENÚ LATERAL (SIDEBAR)
 # ==========================================
@@ -53,24 +59,38 @@ st.sidebar.title("🛠️ Menú SIMAJ")
 if os.path.exists("simaj.png"): st.sidebar.image("simaj.png")
 gas_sel = st.sidebar.radio("Selecciona el Gas a Calibrar:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"])
 
-if gas_sel in ["Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"]:
-    st.info(f"🚧 El formato para {gas_sel} está en construcción. Por favor, selecciona O3 o NOx.")
+if gas_sel == "Dióxido de Azufre (SO2)":
+    st.info(f"🚧 El formato para {gas_sel} está en construcción. Por favor, selecciona O3, NOx o CO.")
     st.stop()
 
-# Diccionario para ir guardando el resumen para el Excel
+# Diccionario compacto para el Excel final
 datos_resumen = {}
 
-# Configuraciones dependientes del gas
+# Variables dinámicas de acuerdo al gas
 if gas_sel == "Ozono (O3)":
     equipos_act = equipos_o3
     modelo_analizador = "Serinus 10"
     flujo_ideal_vol = 500
     flujo_tol = 0.025
-else:
+    cero_tol = 0.003
+    puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]
+    span_gen_default = 0.400
+elif gas_sel == "Óxidos de Nitrógeno (NOx)":
     equipos_act = equipos_nox
     modelo_analizador = "Serinus 40"
-    flujo_ideal_vol = 640
+    flujo_ideal_vol = 650
     flujo_tol = 0.05
+    cero_tol = 0.003
+    puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]
+    span_gen_default = 0.400
+else: # CO
+    equipos_act = equipos_co
+    modelo_analizador = "Serinus 30"
+    flujo_ideal_vol = 1000
+    flujo_tol = 0.025
+    cero_tol = 0.5  # Escala de CO es mayor (50 ppm)
+    puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.001]
+    span_gen_default = 40.0
 
 st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
 st.subheader("Analizadores de Gases")
@@ -122,14 +142,18 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
         estacion_sel = st.selectbox("Estación:", estaciones)
         st.text_input("Fabricante", value="ACOEM")
-        st.text_input("Modelo", value=modelo_analizador)
+        
+        # Ajuste de modelo específico
+        mod_final = "ML9830" if (gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas") else modelo_analizador
+        st.text_input("Modelo", value=mod_final)
+        
         num_serie_val = equipos_act.get(estacion_sel, "")
         st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
         
         datos_resumen["Estación"] = estacion_sel
-        datos_resumen["Gas"] = gas_sel
-        datos_resumen["N/S"] = num_serie_val
+        datos_resumen["Gas Calibrado"] = gas_sel
+        datos_resumen["Número de Serie"] = num_serie_val
 
     with col_der:
         st.markdown("#### ")
@@ -141,7 +165,7 @@ with st.expander("🛠️ DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expan
             st.number_input("Temp exterior (C°) - Ini", value=0.0)
             st.number_input("Temp interior (C°) - Ini", value=0.0)
             st.number_input("Presión ambiental (Torr) - Ini", value=634.0)
-            datos_resumen["Fecha Servicio"] = str(fecha_ref)
+            datos_resumen["Fecha de Servicio"] = str(fecha_ref)
 
         with col_fin:
             st.markdown("### Final")
@@ -213,9 +237,10 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
         fila_regla("Temperatura del flujo", "°C", "10 - 90", 10.0, 90.0, "o3_t_flujo")
         fila_regla("INPUT (Pots)", "N/A", "50-200", 50.0, 200.0, "o3_in")
         fila_libre("Ganancia", "N/A", "N/A", "o3_gan")
-    else: # NOx
+        
+    elif gas_sel == "Óxidos de Nitrógeno (NOx)":
         fila_libre("Flujo Estándar", "cc/min", "650", "nox_f_est")
-        fila_regla("Flujo Volumétrico", "cc/min", "650", 608.0, 672.0, "nox_f_vol") # +/- 5% de 640
+        fila_regla("Flujo Volumétrico", "cc/min", "650", 617.5, 682.5, "nox_f_vol") # ±5%
         fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas")
         fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda")
         fila_regla("Temp. del convertidor", "°C", "250-335", 250.0, 335.0, "nox_t_conv")
@@ -225,6 +250,21 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=abrir_basic
         fila_regla("Alto voltaje", "Volt", "640-670", 640.0, 670.0, "nox_alto_v")
         fila_regla("Flujo de vacio", "torr", "50-200", 50.0, 200.0, "nox_f_vacio")
         fila_libre("Ganancia", "N/A", "N/A", "nox_gan")
+        
+    elif gas_sel == "Monóxido de Carbono (CO)":
+        fila_libre("Flujo Estándar", "cc/min", "1000", "co_f_est")
+        fila_regla("Flujo Volumétrico", "cc/min", "1000", 975.0, 1025.0, "co_f_vol") # ±2.5%
+        fila_libre("Presión de celda", "Torr", "631.7", "co_p_celda") 
+        fila_regla("IR Source", "Volt", "5 ± 0.5", 4.5, 5.5, "co_ir")
+        fila_regla("Temp. de Scrubber", "°C", "90 ± 10", 80.0, 100.0, "co_t_scrub")
+        fila_regla("Voltaje de referencia", "Volt", "3.6 - 4.4", 3.6, 4.4, "co_v_ref")
+        fila_regla("Voltaje de concentración", "Volt", "0 - 3.1", 0.0, 3.1, "co_v_conc")
+        fila_regla("Temp. celda de reaccion", "°C", "50", 45.0, 55.0, "co_t_celda")
+        fila_regla("Temperatura del Chassis", "°C", "0-50", 0.0, 50.0, "co_t_chas")
+        fila_regla("Temperatura de flujo", "°C", "50", 45.0, 55.0, "co_t_flujo")
+        fila_regla("Temperatura del espejo", "°C", "50 ± 10", 40.0, 60.0, "co_t_esp")
+        fila_regla("INPUT (Pots)", "N/A", "180-230", 180.0, 230.0, "co_in")
+        fila_libre("Ganancia", "N/A", "N/A", "co_gan")
 
 # ==========================================
 # 5. VERIFICACIÓN Y AJUSTE DE FLUJO
@@ -262,7 +302,7 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
         with c2: st.write("**Ideal**")
         with c3: st.write("**Captura**")
         with c4: st.write("**% desv**")
-        with h5: st.write("**Condición**")
+        with c5: st.write("**Condición**")
         with c6: st.write("**Ajuste**")
 
         c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1.5, 1.5, 1.5, 1.5])
@@ -296,9 +336,7 @@ with st.expander("💨 VERIFICACIÓN Y AJUSTE DE FLUJO", expanded=abrir_basico):
     st.caption(f"*La condición se cumple cuando la desviación es menor o igual a ±{flujo_tol*100}%")
 
     flujo_vol_ajus = render_tabla_flujo("Ajuste", "ajus")
-    
-    # Guardamos en reporte
-    datos_resumen["Ajuste Volumétrico Req."] = req_ajuste_final
+    datos_resumen["Verific. Flujo Volumétrico"] = req_ajuste_final
 
 # ==========================================
 # 6. REVISIÓN BÁSICA DE COMPONENTES
@@ -312,18 +350,25 @@ with st.expander("🔍 REVISIÓN BÁSICA DE COMPONENTES", expanded=abrir_basico)
     with c5: st.write("**Observaciones**")
 
     if gas_sel == "Ozono (O3)":
-        fila_comp("Lámpara UV", "b_lamp")
+        fila_comp("Lámpara UV (revisión electrónica)", "b_lamp")
         fila_comp("Mangueras", "b_mang")
         fila_comp("Válvulas de calibración", "b_valv")
         fila_comp("Filtro externo de 47 mm", "b_fil")
         fila_comp("Display", "b_disp")
         fila_comp("Manifold", "b_man")
-    else: # NOx
+    elif gas_sel == "Óxidos de Nitrógeno (NOx)":
         fila_comp("Tubería", "b_tub")
         fila_comp("Mangueras", "b_mang_nox")
         fila_comp("Generador de Ozono", "b_gen")
         fila_comp("Display", "b_disp_nox")
         fila_comp("Permapure", "b_perm")
+    else: # CO
+        fila_comp("Tubería", "b_tub_co")
+        fila_comp("Mangueras", "b_mang_co")
+        fila_comp("Válvulas de calibración", "b_valv_co")
+        fila_comp("Filtro externo de 47 mm", "b_fil_co")
+        fila_comp("Display", "b_disp_co")
+        fila_comp("Manifold", "b_man_co")
 
 # ==========================================
 # 7. DATOS DEL CALIBRADOR (INFERIOR)
@@ -355,17 +400,17 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
         with c2: st.write("**Inicial**")
         with c3: st.write("**Final**")
         
-        if gas_sel == "Ozono (O3)":
+        if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)"]:
             c1, c2, c3 = st.columns([2, 1, 1])
             with c1: st.write("Ganancia")
             with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed")
             with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed")
             c1, c2, c3 = st.columns([2, 1, 1])
-            with c1: st.write("Zero Offset (ppb)")
+            with c1: st.write("Zero Offset (ppb/ppm)")
             with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed")
             with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed")
         else: # NOx
-            for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset (ppb) NO", "cs_zno_"), ("Zero Offset (ppb) NO2", "cs_zno2_")]:
+            for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset NO", "cs_zno_"), ("Zero Offset NO2", "cs_zno2_")]:
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1: st.write(param)
                 with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed")
@@ -399,8 +444,8 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
         with c2: st.write("**Cond**")
         with c3:
             if dif_c is not None:
-                if -0.003 <= dif_c <= 0.003: st.success("Cumple")
-                else: st.error("NO CUMPLE")
+                if -cero_tol <= dif_c <= cero_tol: st.success("Cumple ✅")
+                else: st.error("NO CUMPLE ❌")
 
     with col_cs_span:
         st.markdown("#### Concentración Span")
@@ -409,7 +454,7 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
         with c2: st.write("**Analizador**")
         with c3: st.write("**% desv**")
         c1, c2, c3 = st.columns(3)
-        with c1: val_sg = st.number_input("Span Gen", value=0.400, disabled=True, key="vsg")
+        with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True, key="vsg")
         with c2: resp_s = st.number_input("Resp Span", value=0.000, format="%.3f", key="ras")
         with c3:
             if resp_s is not None and val_sg != 0:
@@ -421,8 +466,8 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
         with c2: st.write("**Cond**")
         with c3:
             if desv_s is not None:
-                if -0.025 <= desv_s <= 0.025: st.success("Cumple")
-                else: st.error("NO CUMPLE")
+                if -0.025 <= desv_s <= 0.025: st.success("Cumple ✅")
+                else: st.error("NO CUMPLE ❌")
                 datos_resumen["Verificación Cero-Span"] = "Cumple" if (-0.025 <= desv_s <= 0.025) else "Rechazada"
 
     st.write("")
@@ -438,15 +483,14 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
     col_pts, col_res = st.columns([1.5, 1])
     with col_pts:
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.write("**Calibrador (ppm)**")
-        with c2: st.write("**Analizador (ppm)**")
+        with c1: st.write("**Calibrador**")
+        with c2: st.write("**Analizador**")
         with c3: st.write("**Diferencia**")
         with c4: st.write("**% desv**")
 
-        puntos_cal = [0.400, 0.300, 0.200, 0.100, 0.001] # Ajustado el último punto a 0.001
         x_vals, y_vals, desviaciones = [], [], []
 
-        for i, cal_val in enumerate(puntos_cal):
+        for i, cal_val in enumerate(puntos_multipunto):
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}", label_visibility="collapsed")
             with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}", format="%.3f", label_visibility="collapsed")
@@ -519,10 +563,10 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
         cond_puntos = len(x_vals) == 5
         if cond_m and cond_b and cond_r2 and cond_prom and cond_puntos:
             st.success("✅ **CALIBRACIÓN MULTIPUNTO APROBADA**")
-            datos_resumen["Multipunto"] = "Aprobada"
+            datos_resumen["Calibración Multipunto"] = "Aprobada"
         else:
             st.error("❌ **CALIBRACIÓN MULTIPUNTO RECHAZADA**")
-            datos_resumen["Multipunto"] = "Rechazada"
+            datos_resumen["Calibración Multipunto"] = "Rechazada"
 
     col_graf, col_texto = st.columns([1.5, 1])
     with col_graf:
@@ -548,13 +592,23 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
     with c4: st.write("**Reemplazo**")
     with c5: st.write("**Observaciones**")
 
-    # Mismos componentes que en la básica (simplificado para ejemplo)
-    if gas_sel == "Ozono (O3)":
-        fila_comp("Bomba de Vacío Externa", "d_bomba")
-        fila_comp("Filtro interno 47 mm", "d_fil_i")
-    else:
-        fila_comp("Generador de Ozono", "d_gen")
-        fila_comp("Permapure", "d_perm")
+    if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)"]:
+        fila_comp("Bomba de Vacío externa", "d_bomba")
+        fila_comp("Tubería", "d_tub")
+        fila_comp("Filtro interno de 47 mm", "d_fil_i")
+        fila_comp("Bomba de Vacío Interna", "d_bomba_i")
+        fila_comp("O-rings de celda de reacción", "d_orings")
+        fila_comp("Filtros sinterizados", "d_fsint")
+        fila_comp("Orificios críticos", "d_orit")
+        fila_comp("Ventilador de fuente", "d_vent")
+        fila_comp("Tubo de celda de reacción", "d_tubo")
+        fila_comp("Filtro óptico", "d_fopt")
+        fila_comp("Tarjetas electrónicas", "d_tarj")
+        fila_comp("Fuente de voltaje", "d_fvolt")
+    else: # NOx
+        fila_comp("Bomba de Vacío externa", "d_bomba_nox")
+        fila_comp("Generador de Ozono", "d_gen_nox")
+        fila_comp("Permapure", "d_perm_nox")
 
 # ==========================================
 # 11. RESUMEN Y EXPORTACIÓN A EXCEL
@@ -563,7 +617,7 @@ with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Observaciones Generales**")
     st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
     st.markdown("**Conclusiones**")
-    st.text_area("Conclusiones", placeholder="Mencionar si cumplen criterio...", label_visibility="collapsed", key="res_conc")
+    st.text_area("Conclusiones", placeholder="Conclusiones finales...", label_visibility="collapsed", key="res_conc")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -581,7 +635,6 @@ with c_print:
     st.markdown("<p style='text-align: center; color: gray;'>Presiona <b>Ctrl + P</b> para guardar el PDF nativo de alta calidad.</p>", unsafe_allow_html=True)
 
 with c_excel:
-    # Lógica para crear el Excel en memoria
     df_resumen = pd.DataFrame(list(datos_resumen.items()), columns=["Parámetro", "Estado / Valor"])
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
