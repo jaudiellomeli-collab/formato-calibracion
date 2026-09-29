@@ -39,40 +39,60 @@ st.markdown("""
         height: 25px;
     }
     
-    /* COMPRESOR EXTREMO PARA EL PDF */
+    /* COMPRESOR Y CORRECCIÓN DE ESPACIOS PARA EL PDF */
     @media print {
-        @page { size: letter portrait; margin: 0.5cm; }
+        @page { size: letter portrait; margin: 1cm 0.5cm; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        
+        /* Ocultar elementos innecesarios en la impresión para ahorrar espacio */
         header, footer, .stDeployButton, [data-testid="stSidebar"], #btn-imprimir { display: none !important; }
+        div[role="radiogroup"] { display: none !important; } /* Oculta los botones de selección de gas impresos */
         
-        html, body, [class*="st-"] { font-size: 11px !important; line-height: 1.1 !important; color: black !important; }
-        h1 { font-size: 14px !important; margin: 0 !important; padding: 0 !important; }
-        h2, h3 { font-size: 12px !important; margin: 2px 0 !important; padding: 0 !important; }
-        h4 { font-size: 11px !important; margin: 2px 0 !important; padding: 0 !important; }
+        html, body, [class*="st-"] { 
+            font-size: 11px !important; 
+            line-height: 1.25 !important; 
+            color: black !important; 
+        }
         
+        /* Corrección de encimado en Títulos (se les da un margen mínimo) */
+        h1 { font-size: 16px !important; margin: 8px 0 4px 0 !important; padding: 0 !important; }
+        h2, h3 { font-size: 13px !important; margin: 6px 0 3px 0 !important; padding: 0 !important; }
+        h4 { font-size: 11px !important; margin: 4px 0 2px 0 !important; padding: 0 !important; font-weight: bold !important; }
+        
+        /* Contenedores y saltos de página inteligentes */
         html, body, .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
             height: auto !important; overflow: visible !important; position: static !important;
         }
-        
-        .main .block-container { max-width: 100% !important; padding: 0 !important; }
+        .main .block-container { max-width: 100% !important; padding: 0 10px !important; margin-top: -20px !important; }
         [data-testid="column"] { padding: 0 4px !important; }
-        [data-testid="stVerticalBlock"] { gap: 0 !important; }
-        div[data-testid="stHorizontalBlock"] { gap: 0.5em !important; }
         
-        input[type="text"], input[type="number"], textarea {
-            font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
-        }
-        div[data-baseweb="select"] > div {
-            font-size: 10px !important; padding: 2px !important; min-height: 0 !important; height: 18px !important; border: 1px solid #ccc !important;
+        /* Separación mínima entre columnas y filas para evitar choques */
+        [data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0.3rem !important; align-items: center !important; }
+        
+        /* Altura controlada de inputs */
+        input[type="text"], input[type="number"], textarea, div[data-baseweb="select"] > div {
+            font-size: 10px !important; 
+            padding: 2px 4px !important; 
+            min-height: 20px !important; 
+            height: 22px !important; 
+            border: 1px solid #a0a0a0 !important;
+            margin: 0 !important;
         }
         
+        /* Corrección de los bloques expandibles (Evitar grandes espacios blancos) */
         .stSelectbox svg, .stExpander > details > summary > svg { display: none !important; }
-        .stExpander { border: none !important; border-bottom: 1px solid #ddd !important; margin-bottom: 2px !important; page-break-inside: avoid; }
-        .stExpander summary { padding: 2px 0 !important; min-height: 0 !important; }
+        .stExpander { 
+            border: 1px solid #ddd !important; 
+            border-radius: 4px !important;
+            margin-bottom: 6px !important; 
+            page-break-inside: avoid !important; /* Mantiene la sección unida, evita cortes a mitad de hoja */
+        }
+        .stExpander summary { padding: 4px 6px !important; min-height: 0 !important; background-color: #f7f7f7 !important; }
         details:not([open]) { display: none !important; }
         
-        hr { margin: 2px 0 !important; }
-        .stAlert { padding: 4px !important; border-width: 2px !important; }
+        hr { margin: 4px 0 !important; border-color: #ddd !important; }
+        .stAlert { padding: 4px 8px !important; border-width: 1px !important; margin-bottom: 2px !important; }
         .header-firma { font-size: 12px !important; padding: 2px !important; }
     }
 </style>
