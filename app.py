@@ -21,6 +21,24 @@ st.markdown("""
     .stAlert { border-left: 5px solid #00B2A9 !important; background-color: #f0fdfa !important; }
     div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
     
+    /* ESTILOS PARA EL BLOQUE DE FIRMAS */
+    .header-firma {
+        background-color: #A6A6A6;
+        color: black;
+        font-weight: bold;
+        text-align: center;
+        padding: 5px;
+        border: 1px solid #7a7a7a;
+        margin-bottom: 10px;
+        font-size: 16px;
+    }
+    .linea-firma {
+        margin-top: 40px; 
+        border-bottom: 1px solid black; 
+        width: 100%; 
+        height: 25px;
+    }
+    
     /* COMPRESOR EXTREMO PARA EL PDF */
     @media print {
         @page { size: letter portrait; margin: 0.5cm; }
@@ -55,6 +73,7 @@ st.markdown("""
         
         hr { margin: 2px 0 !important; }
         .stAlert { padding: 4px !important; border-width: 2px !important; }
+        .header-firma { font-size: 12px !important; padding: 2px !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -68,11 +87,27 @@ equipos_co = {"Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169"
 equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763"}
 
 # ==========================================
-# MENÚ LATERAL (SIDEBAR)
+# MENÚ SUPERIOR HORIZONTAL Y LOGO
 # ==========================================
-st.sidebar.title("🛠️ Menú SIMAJ")
-if os.path.exists("simaj.png"): st.sidebar.image("simaj.png")
-gas_sel = st.sidebar.radio("Selecciona el Gas a Calibrar:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"])
+st.write("<br>", unsafe_allow_html=True)
+col_logo, col_menu = st.columns([1, 2.5], gap="large")
+
+with col_logo:
+    if os.path.exists("simaj.png"): 
+        st.image("simaj.png", width=250)
+    else:
+        st.markdown("<h1 style='color:#00B2A9;'>SIMAJ</h1>", unsafe_allow_html=True)
+
+with col_menu:
+    st.markdown("#### Selecciona el Gas a Calibrar:")
+    gas_sel = st.radio(
+        "Selecciona el Gas a Calibrar:", 
+        ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+st.divider()
 
 datos_resumen = {}
 
@@ -91,11 +126,8 @@ else: # SO2
     puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
 
 # ==========================================
-# ENCABEZADO Y LOGO PRINCIPAL
+# ENCABEZADO
 # ==========================================
-if os.path.exists("simaj.png"):
-    st.image("simaj.png", width=250)
-
 st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}")
 st.subheader("Analizadores de Gases")
 
@@ -519,7 +551,7 @@ with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=abrir_cs):
     st.selectbox("¿Se realizó verificación de Scrubber?", ["-", "Sí 🟢", "No 🔴"], key="cs_vs")
 
 # ==========================================
-# 8. CALIBRACIÓN MULTIPUNTO (¡Mejora Estética!)
+# 8. CALIBRACIÓN MULTIPUNTO
 # ==========================================
 with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
     col_pts, col_res = st.columns([1.5, 1])
@@ -573,25 +605,26 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
     cond_m = cond_b = cond_r2 = cond_prom = False
 
     with col_res:
-        st.markdown("**Ecuación y Resultados**")
-        if m is not None:
-            # === MEJORA ESTÉTICA: Componentes st.metric para resultados más legibles ===
-            met1, met2 = st.columns(2)
-            met1.metric("Pendiente (m)", f"{m:.5f}", delta=f"{m - 1:.5f} offset" if m else None, delta_color="inverse")
-            met2.metric("Intercepto (b)", f"{b:.5f}")
-            st.metric("Coef. Determinación (R²)", f"{r2:.6f}")
-            
-            cond_m = 0.98 <= m <= 1.02
-            cond_b = -2.0 <= b <= 2.0
-            cond_r2 = 0.99 <= r2 <= 1.0
-            
-            # Evaluaciones visuales limpias
-            st.write("---")
-            st.markdown(f"Condición m: **{'Cumple ✅' if cond_m else 'NO CUMPLE ❌'}**")
-            st.markdown(f"Condición b: **{'Cumple ✅' if cond_b else 'NO CUMPLE ❌'}**")
-            st.markdown(f"Condición R²: **{'Cumple ✅' if cond_r2 else 'NO CUMPLE ❌'}**")
-        else:
-            st.info("Ingresa los datos del analizador para calcular la regresión.")
+        st.markdown("**Ecuación y Condición**")
+        r1, r2_col, r3 = st.columns([1, 1, 1.2])
+        with r1:
+            st.write("**m =**"); st.write("**b =**"); st.write("**R2 =**")
+        with r2_col:
+            st.write(f"{m:.8f}" if m is not None else "-")
+            st.write(f"{b:.8f}" if b is not None else "-")
+            st.write(f"{r2:.8f}" if r2 is not None else "-")
+        with r3:
+            if m is not None:
+                cond_m = 0.98 <= m <= 1.02
+                cond_b = -2.0 <= b <= 2.0
+                cond_r2 = 0.99 <= r2 <= 1.0
+                if cond_m: st.success("Cumple")
+                else: st.error("NO CUMPLE")
+                if cond_b: st.success("Cumple")
+                else: st.error("NO CUMPLE")
+                if cond_r2: st.success("Cumple")
+                else: st.error("NO CUMPLE")
+            else: st.write("") 
             
         st.markdown("**Condición Promedio**")
         if promedio is not None:
@@ -617,23 +650,11 @@ with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=abrir_multi):
         if len(x_vals) > 1:
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='markers+text', name='Analizador',
-                                     text=[f"{v:.4f}" for v in y_vals], textposition="top left", 
-                                     marker=dict(size=12, color='#00B2A9', line=dict(width=2, color='DarkSlateGrey'))))
-            
+                                     text=[f"{v:.4f}" for v in y_vals], textposition="top left", marker=dict(size=10, color='#00B2A9')))
             x_line = np.linspace(0, max(x_vals)*1.1, 100)
             y_line = m * x_line + b if m is not None else x_line
-            fig.add_trace(go.Scatter(x=x_line, y=y_line, mode='lines', name='Tendencia', 
-                                     line=dict(color='#F37021', width=3, dash='dash')))
-            
-            # === MEJORA ESTÉTICA: Plantilla de reporte científico y título dinámico ===
-            titulo_grafica = f"Curva de Calibración | y = {m:.4f}x + {b:.4f}" if m is not None else "Regresión Lineal"
-            fig.update_layout(
-                title=titulo_grafica, 
-                xaxis_title="Concentración Patrón",
-                yaxis_title="Respuesta del Analizador",
-                template="plotly_white",
-                height=400
-            )
+            fig.add_trace(go.Scatter(x=x_line, y=y_line, mode='lines', name='Tendencia', line=dict(color='#5C6670', dash='dash')))
+            fig.update_layout(title="Regresión Lineal", height=400)
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("**Evidencia Fotográfica**")
@@ -670,7 +691,7 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=abrir_comp)
         fila_comp("Permapure", "d_perm_gn")
 
 # ==========================================
-# 10. RESUMEN Y FIRMAS
+# 10. RESUMEN Y FIRMAS (ACTUALIZADO VISUALMENTE)
 # ==========================================
 with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Observaciones Generales**")
@@ -678,14 +699,38 @@ with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Conclusiones**")
     st.text_area("Conclusiones", placeholder="Mencionar conclusiones...", label_visibility="collapsed", key="res_conc")
 
-    st.write("")
-    c1, c2 = st.columns(2)
+    st.write("<br>", unsafe_allow_html=True)
+    
+    # BLOQUE DE FIRMAS TIPO TABLA (Idéntico a la imagen solicitada)
+    c1, c2 = st.columns(2, gap="large")
+    
     with c1:
-        st.text_input("Empresa/Institución", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
-        st.text_input("Técnico", value="Jaudiel Alejandro Jaime Lomelí", key="n_tec")
+        st.markdown("<div class='header-firma'>Técnico / Operador</div>", unsafe_allow_html=True)
+        st.text_input("Empresa/Ins", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_tec")
+        st.text_input("Nombre", value="Jaudiel Alejandro Jaime Lomelí", key="n_tec")
+        st.date_input("Fecha", datetime.date.today(), key="f_tec")
+        
+        # Línea para firma física
+        st.markdown("""
+        <div style="display: flex; align-items: flex-end; margin-top: 30px;">
+            <span style="font-weight: bold; margin-right: 15px;">Firma:</span>
+            <div class="linea-firma"></div>
+        </div>
+        """, unsafe_allow_html=True)
+        
     with c2:
-        st.text_input("Empresa/Institución ", value="Secretaría de Medio Ambiente y Desarrollo Territorial", key="e_sup")
-        st.text_input("Supervisor", value="Beatriz Rodríguez Pérez", key="n_sup")
+        st.markdown("<div class='header-firma'>Supervisado / Revisado por</div>", unsafe_allow_html=True)
+        st.text_input("Institución", value="Desarrollo Territorial", key="e_sup")
+        st.text_input("Nombre", value="Beatriz Rodríguez Pérez", key="n_sup")
+        st.date_input("Fecha", datetime.date.today(), key="f_sup")
+        
+        # Línea para firma física
+        st.markdown("""
+        <div style="display: flex; align-items: flex-end; margin-top: 30px;">
+            <span style="font-weight: bold; margin-right: 15px;">Firma:</span>
+            <div class="linea-firma"></div>
+        </div>
+        """, unsafe_allow_html=True)
 
 st.divider()
 
