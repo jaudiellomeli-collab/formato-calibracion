@@ -27,7 +27,7 @@ st.markdown("""
     
     .header-firma { background-color: #A6A6A6; color: black; font-weight: bold; text-align: center; padding: 5px; border: 1px solid #7a7a7a; margin-bottom: 10px; font-size: 16px; }
     .linea-firma { margin-top: 40px; border-bottom: 1px solid black; width: 100%; height: 25px; }
-    .header-tabla { background-color: #e0e0e0; font-weight: bold; text-align: center; padding: 4px; border: 1px solid #ccc; }
+    .header-tabla { background-color: #e0e0e0; font-weight: bold; text-align: center; padding: 4px; border: 1px solid #ccc; margin-top: 10px; margin-bottom: 5px; }
     
     @media print {
         @page { size: letter portrait; margin: 1cm 0.5cm; }
@@ -52,19 +52,20 @@ st.markdown("""
         details:not([open]) { display: none !important; }
         hr { margin: 4px 0 !important; border-color: #ddd !important; }
         .stAlert { padding: 4px 8px !important; border-width: 1px !important; margin-bottom: 2px !important; }
+        .header-firma { font-size: 12px !important; padding: 2px !important; }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# BASES DE DATOS DE EQUIPOS
+# BASES DE DATOS DE EQUIPOS Y SERIES
 # ==========================================
 equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
 equipos_nox = {"Pintas": "24-0179", "Santa Fe": "24-0579", "Miravalle": "24-0587", "Centro": "24-0595", "Country": "23-2360", "Atemajac": "24-0705", "Oblatos": "24-0710", "Santa Margarita": "24-0570", "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700"}
 equipos_co = {"Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395"}
 equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763"}
-equipos_pm10 = {"Pintas": "CM17461024", "Santa Fe": "...", "Miravalle": "...", "Centro": "...", "Country": "...", "Atemajac": "...", "Oblatos": "...", "Santa Margarita": "...", "Vallarta": "...", "Loma Dorada": "...", "Águilas": "...", "Santa Anita": "...", "Tlaquepaque": "..."}
-equipos_pm25 = {"Pintas": "5014i203281301", "Santa Fe": "DN17069", "Miravalle": "...", "Centro": "...", "Country": "...", "Atemajac": "...", "Oblatos": "...", "Santa Margarita": "...", "Vallarta": "...", "Loma Dorada": "...", "Águilas": "...", "Santa Anita": "...", "Tlaquepaque": "..."}
+equipos_pm10 = {"Pintas": "CM17461024", "Santa Fe": "DN16867", "Miravalle": "DN16862", "Centro": "DN17077", "Country": "G3448", "Atemajac": "", "Oblatos": "", "Santa Margarita": "EN12458", "Vallarta": "5014i203241211", "Loma Dorada": "5014i203171211", "Águilas": "EN12457", "Santa Anita": "EN12289", "Tlaquepaque": "CM18091003"}
+equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": "DN17070", "Centro": "DN16864", "Country": "N14028", "Atemajac": "", "Oblatos": "", "Santa Margarita": "", "Vallarta": "5014i203131210", "Loma Dorada": "", "Águilas": "EN12462", "Santa Anita": "EN12291", "Tlaquepaque": ""}
 
 # ==========================================
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
@@ -106,6 +107,7 @@ fab_cal1_def = "" if es_externo else "Bios International Corp"
 mod_cal1_def = "" if es_externo else "Definer 220 M"
 lab_cal1_def = "" if es_externo else "COMEXSA"
 tec_cal1_def = "" if es_externo else "Lizeth Morales"
+cert_cal1_def = "" if es_externo else "E13496529 Flujo"
 fab_cal2_def = "" if es_externo else "ACOEM"
 mod_cal2_def = "" if es_externo else "Serinus Cal 3000"
 lab_cal2_def = "" if es_externo else "INECC"
@@ -306,7 +308,6 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Valor de ajuste POT lámpara", "-", "10-100", 10.0, 100.0, "so2_pot"))
 
     elif es_bam:
-        # PM BAM: Adiós flujo volumétrico, puros parámetros crudos
         fila_libre("Reloj Horario/fecha", "N/A", "N/A", "bam_reloj")
         fila_libre("RS232", "N/A", "N/A", "bam_rs232")
         fila_libre("Rango de operación", "mg", "0 - 1,000", "bam_rango")
@@ -328,12 +329,11 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Humedad relativa ambiental", "%", "5 - 95", 5.0, 95.0, "bam_hramb"))
 
     elif es_thermo:
-        # PM Thermo: Adiós volumétricos, solo Nominal y Raw
         fila_libre("Rango de operación", "ug/m3", "0 - 1000", "th_rango")
         fila_libre("Tiempo de integración", "Minutos", "20", "th_tint")
         procesar_resultado(*fila_regla("Flujo Nominal", "L/min", "16.67", 16.00, 17.34, "th_fnom"))
         procesar_resultado(*fila_regla("Braw", "N/A", "5000 - 20000", 5000.0, 20000.0, "th_braw"))
-        procesar_resultado(*fila_regla("Bzero", "N/A", "0", -500.0, 500.0, "th_bzero")) # Tolerancia típica
+        procesar_resultado(*fila_regla("Bzero", "N/A", "0", -500.0, 500.0, "th_bzero")) 
         procesar_resultado(*fila_regla("Alpha", "N/A", "0 - 100", 0.0, 100.0, "th_alpha"))
         procesar_resultado(*fila_regla("Temperatura Ambiental", "°C", "4 - 50", 4.0, 50.0, "th_tamb"))
         procesar_resultado(*fila_regla("Presión Barométrica", "mmHg", "400 - 800", 400.0, 800.0, "th_pbaro"))
@@ -342,6 +342,11 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Presión de vacío de la muestra", "mmHg", "-5 a 250", -5.0, 250.0, "th_pvac"))
         procesar_resultado(*fila_regla("Temperatura de flujo", "°C", "5 - 60", 5.0, 60.0, "th_tflujo"))
         procesar_resultado(*fila_regla("Temperatura de la tarjeta", "°C", "5 - 60", 5.0, 60.0, "th_ttarj"))
+
+    if len(resultados_pg) > 0:
+        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
+    else:
+        datos_resumen["Parámetros Generales"] = "Sin datos calculables"
 
 # ==========================================
 # 4. VERIFICACIÓN Y CALIBRACIÓN DE SENSORES Y FLUJO (PM)
@@ -363,7 +368,6 @@ if es_particulas:
         st.divider()
 
         if es_thermo:
-            # BLOQUE THERMO (3 Puntos Temp y Humedad)
             def sensor_3p(titulo, limite_dif, val_ideal_desc):
                 st.markdown(f"#### {titulo}")
                 c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
@@ -420,7 +424,6 @@ if es_particulas:
                 st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm</small>", unsafe_allow_html=True)
 
         elif es_bam:
-            # BLOQUE BAM (Flujo Litros por Minuto)
             st.markdown("#### Flujo en Litros por Minuto")
             c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
             with c1: st.write("**Calibrador (lpm)**")
@@ -526,7 +529,7 @@ if es_externo:
                     st.text_input("Descripción:", key=f"desc_foto_{i}", placeholder="Ej. Filtro reemplazado...")
 
 # ==========================================
-# 6. LIMPIEZA, REVISIÓN Y REEMPLAZO (PM Separado)
+# 6. LIMPIEZA, REVISIÓN Y REEMPLAZO
 # ==========================================
 with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
     if es_gas:
@@ -537,9 +540,23 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         with c4: st.markdown("<b>Reemplazo</b>", unsafe_allow_html=True)
         with c5: st.write("**Observaciones**")
 
-        fila_comp("Bomba de Vacío externa", "d_bomba")
-        fila_comp("Tarjetas electrónicas", "d_tarj")
-        fila_comp("Fuente de voltaje", "d_fvolt")
+        if gas_sel == "Ozono (O3)":
+            fila_comp("Lámpara UV (revisión electrónica)", "b_lamp")
+            fila_comp("Mangueras", "b_mang")
+            fila_comp("Válvulas de calibración", "b_valv")
+            fila_comp("Filtro externo de 47 mm", "b_fil")
+        elif gas_sel == "Óxidos de Nitrógeno (NOx)":
+            fila_comp("Tubería", "b_tub")
+            fila_comp("Mangueras", "b_mang_nox")
+            fila_comp("Generador de Ozono", "b_gen")
+        elif gas_sel == "Monóxido de Carbono (CO)":
+            fila_comp("Tubería", "b_tub_co")
+            fila_comp("Mangueras", "b_mang_co")
+            fila_comp("Filtro externo de 47 mm", "b_fil_co")
+        elif gas_sel == "Dióxido de Azufre (SO2)":
+            fila_comp("Tubería", "b_tub_so2")
+            fila_comp("Mangueras", "b_mang_so2")
+            fila_comp("Lámpara UV", "b_lamp_so2")
     
     elif es_particulas:
         st.markdown("<div class='header-tabla'>Limpieza de:</div>", unsafe_allow_html=True)
@@ -591,21 +608,29 @@ if es_gas:
             with c2: st.write("**Inicial**")
             with c3: st.write("**Final**")
             
-            c1, c2, c3 = st.columns([2, 1, 1])
-            with c1: st.write("Ganancia")
-            with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed")
-            with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed")
-            c1, c2, c3 = st.columns([2, 1, 1])
-            with c1: st.write("Zero Offset (ppb/ppm)")
-            with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed")
-            with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed")
+            if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"]:
+                c1, c2, c3 = st.columns([2, 1, 1])
+                with c1: st.write("Ganancia")
+                with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed")
+                with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed")
+                c1, c2, c3 = st.columns([2, 1, 1])
+                with c1: st.write("Zero Offset (ppb/ppm)")
+                with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed")
+                with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed")
+            else:
+                for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset NO", "cs_zno_"), ("Zero Offset NO2", "cs_zno2_")]:
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    with c1: st.write(param)
+                    with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed")
+                    with c3: st.number_input("fin", key=f"{kp}f", label_visibility="collapsed")
 
         with col_cs_der:
             st.markdown("**Tiempo de respuesta al suministrar gas**")
-            c1, c2, c3 = st.columns([1, 2, 1])
-            with c1: st.write("Cero")
-            with c2: st.number_input("val", key="tr_c", label_visibility="collapsed")
-            with c3: st.write("min")
+            for gas, kp in [("Cero", "tr_c"), ("Span", "tr_s")]:
+                c1, c2, c3 = st.columns([1, 2, 1])
+                with c1: st.write(gas)
+                with c2: st.number_input("val", key=kp, label_visibility="collapsed")
+                with c3: st.write("min")
 
         col_cs_cero, col_cs_span = st.columns(2)
         dif_c = desv_s = None
@@ -613,7 +638,7 @@ if es_gas:
         with col_cs_cero:
             st.markdown("#### Concentración Cero")
             c1, c2, c3 = st.columns(3)
-            with c1: val_cg = st.number_input("Cero Gen", value=0.001, disabled=True, key="vcg")
+            with c1: val_cg = st.number_input("Cero Gen", value=0.001 if gas_sel != "Dióxido de Azufre (SO2)" else 0.0001, disabled=True, key="vcg")
             with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
             with c3:
                 if resp_c is not None:
@@ -672,9 +697,42 @@ if es_gas:
                 st.info("Ingresa los datos para regresión.")
 
 # ==========================================
+# 9. REVISIÓN DETALLADA
+# ==========================================
+with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
+    c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
+    with c1: st.write("**Componente**")
+    with c2: st.write("**Estado**")
+    with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
+    with c4: st.markdown("<b>Reemplazo</b>", unsafe_allow_html=True)
+    with c5: st.write("**Observaciones**")
+
+    if es_gas:
+        if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)"]:
+            fila_comp("Bomba de Vacío externa", "d_bomba")
+            fila_comp("Tubería", "d_tub")
+            fila_comp("Filtro interno de 47 mm", "d_fil_i")
+            fila_comp("Bomba de Vacío Interna", "d_bomba_i")
+            fila_comp("O-rings de celda de reacción", "d_orings")
+            fila_comp("Filtros sinterizados", "d_fsint")
+            fila_comp("Orificios críticos", "d_orit")
+            fila_comp("Ventilador de fuente", "d_vent")
+            fila_comp("Tubo de celda de reacción", "d_tubo")
+            fila_comp("Filtro óptico", "d_fopt")
+            fila_comp("Tarjetas electrónicas", "d_tarj")
+            fila_comp("Fuente de voltaje", "d_fvolt")
+        else: # NOx y SO2
+            fila_comp("Bomba de Vacío externa", "d_bomba_gn")
+            fila_comp("Generador de Ozono", "d_gen_gn")
+            fila_comp("Permapure", "d_perm_gn")
+    elif es_particulas:
+        fila_comp("Sensores de humedad / temperatura", "d_sensores")
+        fila_comp("Sistema neumático y O-rings", "d_orings_pm")
+
+# ==========================================
 # 10. RESUMEN Y FIRMAS
 # ==========================================
-with st.expander("✍️ RESUMEN Y FIRMAS FINALES", expanded=True):
+with st.expander("✍️️ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Observaciones Generales**")
     obs_gen = st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
     st.markdown("**Conclusiones**")
