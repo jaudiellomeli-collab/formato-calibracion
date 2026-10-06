@@ -912,12 +912,14 @@ def nombre_pdf():
     gas_n = gas_sel[:2] if es_gas else f"PM_{pm_tipo}"
     return f"Formato_{tipo_servicio[:3]}_{estacion_sel}_{gas_n}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
-col_imprimir, col_pdf, col_drive = st.columns(3)
+col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
+mensajes = st.columns(3)[2].container()  # los avisos van en una fila aparte, bajo el botón de Drive, para no mover los botones
 
 with col_imprimir:
     components.html(
         """
-        <div style="text-align: center; margin-top: 10px;" id="btn-imprimir">
+        <style>body { margin: 0; }</style>
+        <div style="display: flex; align-items: center; justify-content: center; height: 80px;" id="btn-imprimir">
             <button onclick="window.parent.print()" style="padding: 14px 28px; font-size: 16px; font-weight: bold; background-color: #00B2A9; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
                 🖨️ Imprimir / Guardar PDF Visual
             </button>
@@ -944,14 +946,6 @@ def credenciales_google():
     return Credentials(None, refresh_token=cfg["refresh_token"], token_uri="https://oauth2.googleapis.com/token",
                        client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
 
-def armar_excel():
-    """Todos los campos capturados (ID y valor) en un Excel."""
-    estado = [{"Campo (ID)": k, "Valor Capturado": str(v)} for k, v in st.session_state.items() if not k.startswith("_")]
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        pd.DataFrame(estado).to_excel(writer, sheet_name="Datos_Capturados", index=False)
-    return buffer.getvalue()
-
 def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
     media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
     return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute()
@@ -974,25 +968,22 @@ with col_drive:
         except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
             faltan = SECRETS_REQUERIDOS
         if sin_estacion:
-            st.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
+            mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
         elif faltan:
-            st.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
+            mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
         else:
             pdf_bytes, nombre_del_pdf = generar_pdf(), nombre_pdf()
             enlace = ""
-            with st.spinner("Subiendo el reporte a Google Drive..."):
+            with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
                 try:
                     servicio_drive = build("drive", "v3", credentials=credenciales_google())
                     carpeta = st.secrets["drive_carpeta_id"]
-                    nombre_excel = nombre_del_pdf.replace("Formato_", "Reporte_").removesuffix(".pdf") + ".xlsx"
-                    subir_a_drive(servicio_drive, nombre_excel, armar_excel(),
-                                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", carpeta)
                     pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta)
                     enlace = pdf_subido.get("webViewLink", "")
-                    st.success("✅ Reporte (PDF y Excel) guardado en Drive.")
+                    st.success("✅ PDF guardado en Drive.")
                 except Exception as e:
                     st.error(f"❌ No se pudo guardar en Drive: {type(e).__name__}: {e}")
-            with st.spinner("Enviando el PDF al coordinador..."):
+            with mensajes, st.spinner("Enviando el PDF al coordinador..."):
                 try:
                     servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
                     gas_txt = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
