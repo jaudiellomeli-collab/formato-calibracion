@@ -126,11 +126,6 @@ tec_cal2_def = "" if es_externo else "Humberto Bustamante"
 tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
 sup_nombre_def = "" if es_externo else "Beatriz Rodríguez Pérez"
 
-# MOCK TEMPORAL: valores de prueba para que la app corra completa (reemplazar por los reales)
-flujo_ideal_vol, flujo_tol = 500.0, 0.025
-cero_tol, span_gen_default = 1.0, 400.0
-puntos_multipunto = [400.0, 300.0, 200.0, 100.0]
-
 # ==========================================
 # ENCABEZADO
 # ==========================================
