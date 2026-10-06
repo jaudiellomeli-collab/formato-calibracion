@@ -96,10 +96,19 @@ es_bam = gas_sel == "PM BAM"
 es_thermo = gas_sel == "PM Thermo"
 es_particulas = es_bam or es_thermo
 
-if gas_sel == "Ozono (O3)": equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
-elif gas_sel == "Óxidos de Nitrógeno (NOx)": equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
-elif gas_sel == "Monóxido de Carbono (CO)": equipos_act = equipos_co; modelo_analizador = "Serinus 30"
-elif gas_sel == "Dióxido de Azufre (SO2)": equipos_act = equipos_so2; modelo_analizador = "Serinus 50"
+# (AQUÍ ESTABA EL ERROR: REASIGNACIÓN CORRECTA DE VARIABLES MATEMÁTICAS)
+if gas_sel == "Ozono (O3)": 
+    equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
+    flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
+elif gas_sel == "Óxidos de Nitrógeno (NOx)": 
+    equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
+    flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
+elif gas_sel == "Monóxido de Carbono (CO)": 
+    equipos_act = equipos_co; modelo_analizador = "Serinus 30"
+    flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.001]; span_gen_default = 40.0
+elif gas_sel == "Dióxido de Azufre (SO2)": 
+    equipos_act = equipos_so2; modelo_analizador = "Serinus 50"
+    flujo_ideal_vol = 700; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
 elif es_bam or es_thermo:
     equipos_act = equipos_pm10 if pm_tipo == "PM10" else equipos_pm25
     modelo_analizador = "BAM 1020" if es_bam else "5014i"
@@ -521,7 +530,7 @@ if es_particulas:
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
 
-    with st.expander("⚖️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
+    with st.expander("⚖️️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
         st.markdown("#### Ingreso de datos de Foils de Calibración")
         col_cm1, col_cm2 = st.columns(2)
         with col_cm1:
@@ -860,7 +869,7 @@ with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
 # ==========================================
 # 10. RESUMEN Y FIRMAS
 # ==========================================
-with st.expander("✍️️ RESUMEN Y FIRMAS FINALES", expanded=True):
+with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Observaciones Generales**")
     obs_gen = st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
     st.markdown("**Conclusiones**")
