@@ -5,14 +5,12 @@ import plotly.graph_objects as go
 import pandas as pd
 import io
 import os
-import base64
+import json
 from PIL import Image
 import streamlit.components.v1 as components
-from email.message import EmailMessage
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from pdf_formato import construir_pdf, Caja, Alerta, Neg
 
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
 
@@ -96,7 +94,9 @@ es_bam = gas_sel == "PM BAM"
 es_thermo = gas_sel == "PM Thermo"
 es_particulas = es_bam or es_thermo
 
-# (AQUÍ ESTABA EL ERROR: REASIGNACIÓN CORRECTA DE VARIABLES MATEMÁTICAS)
+# Inicializar variable base para flujo antes de que pueda ser modificada por las condiciones
+flujo_ideal_vol = 0 
+
 if gas_sel == "Ozono (O3)": 
     equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
     flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
@@ -108,7 +108,8 @@ elif gas_sel == "Monóxido de Carbono (CO)":
     flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.001]; span_gen_default = 40.0
 elif gas_sel == "Dióxido de Azufre (SO2)": 
     equipos_act = equipos_so2; modelo_analizador = "Serinus 50"
-    flujo_ideal_vol = 700; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
+    flujo_ideal_vol = 700; # Valor base (se actualizará dinámicamente según la marca en la Sec 1)
+    flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
 elif es_bam or es_thermo:
     equipos_act = equipos_pm10 if pm_tipo == "PM10" else equipos_pm25
     modelo_analizador = "BAM 1020" if es_bam else "5014i"
@@ -135,46 +136,6 @@ st.subheader("Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Pa
 # ==========================================
 # FUNCIONES AUXILIARES GLOBALES
 # ==========================================
-# Registro de lo que se dibuja, para armar el PDF con la misma estructura del formato
-S_DAT = "Datos del analizador y condiciones ambientales"
-S_HIS = "Histórico de mantenimientos"
-S_PG = "Revisión de parámetros generales"
-S_SENS = "Verificación y calibración de sensores y flujo"
-S_MAS = "Calibración de masas (foils)"
-S_FLU = "Verificación y ajuste de flujo"
-S_FOT = "Evidencias fotográficas (proveedor)"
-S_LIM = "Limpieza, revisión y reemplazo"
-S_CAL = "Datos del calibrador de gases"
-S_CS = "Verificación cero-span"
-S_MUL = "Calibración multipunto"
-S_DET = "Revisión detallada de componentes"
-S_RES = "Resumen y firmas finales"
-ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_FOT, S_LIM, S_CAL, S_CS, S_MUL, S_DET, S_RES]
-
-pdf_secciones = {}
-pdf_ctx = {"sec": "", "sub": ""}
-
-def _sec(nombre):
-    return pdf_secciones.setdefault(nombre, {"pares": [], "tablas": {}, "textos": [], "notas": [], "fotos": []})
-
-def kv(seccion, etiqueta, valor, grupo=""):
-    """Campo con etiqueta; los de un mismo grupo van en la misma columna del PDF."""
-    _sec(seccion)["pares"].append((etiqueta, valor, grupo))
-    return valor
-
-def tabla_pdf(seccion, nombre, encabezado, fila, pesos=None, barra=False):
-    _sec(seccion)["tablas"].setdefault(nombre, {"enc": encabezado, "filas": [], "pesos": pesos, "barra": barra})["filas"].append(fila)
-
-def nota_pdf(seccion, texto):
-    _sec(seccion)["notas"].append(texto)
-
-def _res(ok):
-    """Aviso Cumple / NO CUMPLE (vacío si no hay dato)."""
-    return Alerta({True: "Cumple", False: "NO CUMPLE"}.get(ok, ""), ok)
-
-ENC_PG = ["Parámetro", "Unidades", "Ideal", "Inicial", "Comentarios", "Final", "Comentarios"]
-PESOS_PG = [2, 1, 1, 1.5, 1.5, 1.5, 1.5]
-
 def evaluar_y_mostrar(val, min_val, max_val):
     if val is None: st.write("")
     elif min_val <= val <= max_val: st.success("Cumple ✅"); return True
@@ -189,7 +150,6 @@ def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     with c5: r_ini = evaluar_y_mostrar(val_ini, min_val, max_val)
     with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
     with c7: r_fin = evaluar_y_mostrar(val_fin, min_val, max_val)
-    tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(val_ini), _res(r_ini), Caja(val_fin), _res(r_fin)], PESOS_PG)
     return r_ini, r_fin 
 
 def fila_libre(param, unit, ideal_str, key):
@@ -197,28 +157,24 @@ def fila_libre(param, unit, ideal_str, key):
     with c1: st.write(param)
     with c2: st.write(unit)
     with c3: st.write(ideal_str)
-    with c4: v_ini = st.text_input("ini", key=f"ini_{key}", label_visibility="collapsed")
-    with c5: c_ini = st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
-    with c6: v_fin = st.text_input("fin", key=f"fin_{key}", label_visibility="collapsed")
-    with c7: c_fin = st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
-    tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(v_ini), Caja(c_ini), Caja(v_fin), Caja(c_fin)], PESOS_PG)
+    with c4: st.text_input("ini", key=f"ini_{key}", label_visibility="collapsed")
+    with c5: st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
+    with c6: st.text_input("fin", key=f"fin_{key}", label_visibility="collapsed")
+    with c7: st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
     return None, None
 
 def fila_comp(nombre, key, placeholder="Especificar..."):
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write(nombre)
-    with c2: estado = st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-    with c3: limpieza = st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
-    with c4: reemplazo = st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
-    with c5: obs = st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
-    tabla_pdf(pdf_ctx["sec"], "", ["Componente", "Estado", "Limpieza", "Reemplazo", "Observaciones"],
-              [nombre, Caja(estado), Caja(limpieza), Caja(reemplazo), Caja(obs, placeholder)], [2.5, 1, 1, 1, 3])
+    with c2: st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
+    with c3: st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
+    with c4: st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
+    with c5: st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
 
 def fila_simple(nombre, key, ph="No se realizó"):
     c1, c2 = st.columns([1, 2])
     with c1: st.write(nombre)
-    with c2: obs = st.text_input("obs", key=key, label_visibility="collapsed", placeholder=ph)
-    tabla_pdf(pdf_ctx["sec"], pdf_ctx["sub"], None, [nombre, Caja(obs, ph)], [1, 2], barra=True)
+    with c2: st.text_input("obs", key=key, label_visibility="collapsed", placeholder=ph)
 
 # ==========================================
 # 1. DATOS DEL ANALIZADOR
@@ -227,45 +183,59 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
     col_izq, col_der = st.columns([1, 1.2])
     with col_izq:
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
-        estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones))
+        estacion_sel = st.selectbox("Estación:", estaciones)
         
         fab_final = "ACOEM" if es_gas else ("Met One" if es_bam else "Thermo Fisher")
         mod_final = modelo_analizador
         if gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas": mod_final = "ML9830"
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
-        kv(S_DAT, "Fabricante", st.text_input("Fabricante", value=fab_final))
-        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final))
+        fab_capturado = st.text_input("Fabricante", value=fab_final, key="fab_analizador")
+        st.text_input("Modelo", value=mod_final)
         num_serie_val = equipos_act.get(estacion_sel, "")
-        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True))
-        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0))
+        st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
+        st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0)
         
-        falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"]))
-        if falla == "Sí 🔴": kv(S_DAT, "Descripción de falla", st.text_area("Descripción de Falla o Alarma"))
+        falla = st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"])
+        if falla == "Sí 🔴": st.text_area("Descripción de Falla o Alarma")
 
         datos_resumen["Estación"] = estacion_sel
         datos_resumen["Gas Calibrado"] = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
+        
+        # Ajuste dinámico de flujo ideal para SO2 según marca ingresada
+        if gas_sel == "Dióxido de Azufre (SO2)":
+            marca_check = fab_capturado.upper()
+            if "ML" in marca_check: flujo_ideal_vol = 500
+            elif "ECOTECH" in marca_check: flujo_ideal_vol = 700
+            elif "ACOEM" in marca_check: flujo_ideal_vol = 750
 
     with col_der:
         st.markdown("#### ")
         col_ini, col_fin = st.columns(2)
         with col_ini:
             st.markdown("### Inicial")
-            fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today()), "Inicial")
-            kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None), "Inicial")
-            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=0.0), "Inicial")
-            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=0.0), "Inicial")
+            fecha_ref = st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today())
+            st.time_input("Hora (Inicial)", value=None)
+            st.number_input("Temp exterior (C°) - Ini", value=0.0)
+            st.number_input("Temp interior (C°) - Ini", value=0.0)
             datos_resumen["Fecha de Servicio"] = str(fecha_ref)
+            
+            # Extraer variables para el nombre del archivo de drive aaaa.mm.dd
+            año_f = fecha_ref.strftime("%Y")
+            mes_f = fecha_ref.strftime("%m")
+            dia_f = fecha_ref.strftime("%d")
+            
         with col_fin:
             st.markdown("### Final")
-            kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today()), "Final")
-            kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None), "Final")
-            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=0.0), "Final")
-            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=0.0), "Final")
+            st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today())
+            st.time_input("Hora (Final)", value=None)
+            st.number_input("Temp exterior (C°) - Fin", value=0.0)
+            st.number_input("Temp interior (C°) - Fin", value=0.0)
 
 # ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
 # ==========================================
+req_basico = req_cs = req_comp = True
 if not es_externo:
     with st.expander("📅 HISTÓRICO DE MANTENIMIENTOS", expanded=True):
         h1, h2, h3, h4 = st.columns([2, 1.5, 1, 1.5])
@@ -281,9 +251,6 @@ if not es_externo:
             with c3: st.write(str(periodicidad_meses))
             with c4:
                 es_req = (fecha_ref - fecha_ult).days > (periodicidad_meses * 30)
-                tabla_pdf(S_HIS, "", ["Mantenimiento", "Fecha de último registro", "Periodicidad (Mes)", "Mantenimiento Requerido"],
-                          [nombre_mant, Caja(fecha_ult), periodicidad_meses, Alerta("Requerido" if es_req else "No Requerido", not es_req)],
-                          [2, 1.5, 1, 1.5])
                 if es_req: st.error("Requerido")
                 else: st.success("No Requerido")
                 return es_req
@@ -291,8 +258,11 @@ if not es_externo:
         req_basico = fila_historico("Mantenimiento Básico", "basico", datetime.date(2026, 5, 10), 1)
         req_cs = fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
         req_comp = fila_historico("Mantenimiento Completo", "completo", datetime.date(2025, 1, 1), 6)
-else:
-    req_basico = req_cs = req_comp = True
+
+# Variable maestra para decidir la Nomenclatura Dinámica VA / CS / CM
+nomenclatura_tipo = "VA" # Por defecto es Verificación Ambiental (Básico)
+if req_comp: nomenclatura_tipo = "CM" # Si se hizo Calibración Multipunto / Completo
+elif req_cs: nomenclatura_tipo = "CS" # Si se hizo Cero-Span pero no Multipunto
 
 # ==========================================
 # 3. PARÁMETROS GENERALES
@@ -354,7 +324,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         fila_libre("Ganancia", "N/A", "N/A", "co_gan")
         
     elif gas_sel == "Dióxido de Azufre (SO2)":
-        fila_libre("Flujo", "cc/min", "700", "so2_f_vol")
+        fila_libre("Flujo", "cc/min", str(flujo_ideal_vol), "so2_f_vol")
         fila_libre("Presión de gas", "Torr", "-", "so2_p_gas")
         procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.5 - 3.5", 1.5, 3.5, "so2_v_ref"))
         procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "34 - 36", 34.0, 36.0, "so2_c_lamp"))
@@ -423,10 +393,6 @@ if es_particulas:
             st.text_input("Laboratorio", value="Comexsa" if not es_externo else "", key="pm_cal_lab")
             st.date_input("Fecha de calibración", datetime.date(2026, 1, 20), key="pm_cal_fecha")
             st.text_input("No de certificado", value="E252677468" if not es_externo else "", key="pm_cal_cert")
-        for etiqueta, k, grupo in [("Marca", "pm_cal_mca", "Calibrador (Sensores y Flujo)"), ("Modelo", "pm_cal_mod", "Calibrador (Sensores y Flujo)"),
-                                   ("N/S", "pm_cal_ns", "Calibrador (Sensores y Flujo)"), ("Laboratorio", "pm_cal_lab", "Certificación"),
-                                   ("Fecha de calibración", "pm_cal_fecha", "Certificación"), ("No de certificado", "pm_cal_cert", "Certificación")]:
-            kv(S_SENS, etiqueta, st.session_state.get(k), grupo)
 
         st.divider()
 
@@ -446,9 +412,6 @@ if es_particulas:
                     with c3:
                         if c_val is not None and m_val is not None: st.write(f"{(m_val - c_val):.2f}")
                         else: st.write("-")
-                    tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Caja(c_val), Caja(m_val), f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-", ""],
-                              [1, 1, 1, 2])
                     if c_val is not None: cal_v.append(c_val)
                     if m_val is not None: mon_v.append(m_val)
                 
@@ -466,12 +429,7 @@ if es_particulas:
                         else: st.error(f"{dif_prom:.2f}")
                     else: st.write("-")
                 with c4:
-                    obs_sensor = st.text_input("Comentarios", key=f"{titulo}_obs", placeholder="Comentarios...", label_visibility="collapsed")
-                    dif_pdf = Alerta(f"{prom_m - prom_c:.2f}", abs(prom_m - prom_c) <= limite_dif) if prom_c and prom_m else "-"
-                    tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Neg(f"{prom_c:.2f}" if prom_c else "Promedio"), Neg(f"{prom_m:.2f}" if prom_m else "Promedio"), dif_pdf,
-                               Caja(obs_sensor, "Comentarios...")], [1, 1, 1, 2])
-                    nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
+                    st.text_input("Comentarios", key=f"{titulo}_obs", placeholder="Comentarios...", label_visibility="collapsed")
                     st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
             
             col_izq, col_der = st.columns(2)
@@ -493,12 +451,6 @@ if es_particulas:
                 with c3:
                     if f_cal and f_mon: st.write(f"{((f_mon-f_cal)/f_cal)*100:.2f}%")
                 st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm</small>", unsafe_allow_html=True)
-                enc_baro = ["Medición", "Calibrador", "Monitor"]
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Lectura", Caja(c_bar1), Caja(m_bar1)])
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Calibración", Caja(c_bar2), Caja(m_bar2)])
-                tabla_pdf(S_SENS, "Flujo", ["Calibrador", "Monitor", "% Desviación"],
-                          [Caja(f_cal), Caja(f_mon), f"{((f_mon-f_cal)/f_cal)*100:.2f}%" if f_cal and f_mon else ""])
-                nota_pdf(S_SENS, "Flujo: el valor promedio debe estar entre 16.00 y 17.34 Lpm")
 
         elif es_bam:
             st.markdown("#### Flujo en Litros por Minuto")
@@ -517,15 +469,10 @@ if es_particulas:
                     if idx == 0: st.text_area("Observaciones Generales", key="bam_f_obs", height=90, label_visibility="collapsed")
                 with c4:
                     if idx == 0: st.radio("¿Calibró?", ["No", "Sí"], key="bam_f_cal", horizontal=True, label_visibility="collapsed")
-                tabla_pdf(S_SENS, "Flujo en Litros por Minuto", ["Calibrador (lpm)", "Monitor (lpm)", "Comentarios", "Requirió Ajuste"],
-                          [Caja(target), Caja(st.session_state.get(f"bam_fm_{idx}")),
-                           Caja(st.session_state.get("bam_f_obs")) if idx == 0 else "", Caja(st.session_state.get("bam_f_cal")) if idx == 0 else ""],
-                          [1, 1, 2, 1])
             
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
-            nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
 
-    with st.expander("⚖️️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
+    with st.expander("⚖️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
         st.markdown("#### Ingreso de datos de Foils de Calibración")
         col_cm1, col_cm2 = st.columns(2)
         with col_cm1:
@@ -551,13 +498,6 @@ if es_particulas:
         with c2: st.number_input("Span Ideal", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
         with c3: st.number_input("Beta Span", value=0.0, key="cm_beta_span", label_visibility="collapsed")
 
-        for etiqueta, k in [("Equipo de calibración (foils)", "cm_eq"), ("Reference No. / Certificado", "cm_ref"),
-                            ("Fecha de certificación de foils", "cm_fecha"), ("Mass Coefficient inicial", "cm_mass_ini")]:
-            kv(S_MAS, etiqueta, st.session_state.get(k))
-        enc_masas = ["Lectura", "Foil Value Span (Ideal)", "Beta Average (Lectura del equipo)"]
-        tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
-        tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
-
 # ==========================================
 # 5. VERIFICACIÓN Y AJUSTE DE FLUJO (SÓLO GASES)
 # ==========================================
@@ -577,12 +517,6 @@ if es_gas:
             st.date_input("Vigente hasta", datetime.date(2026, 6, 20), key="vig_cal1")
             st.text_input("No de certificado", value=cert_cal1_def, key="cert_cal1")
 
-        for etiqueta, k, grupo in [("Fabricante", "fab_cal1", "Calibrador de Flujo"), ("Modelo", "mod_cal1", "Calibrador de Flujo"),
-                                   ("N/S Calibrador de Flujo", "ns_cal1", "Calibrador de Flujo"), ("Laboratorio", "lab_cal1", "Certificación"),
-                                   ("Técnico", "tec_cal1", "Certificación"), ("Vigente hasta", "vig_cal1", "Certificación"),
-                                   ("No de certificado", "cert_cal1", "Certificación")]:
-            kv(S_FLU, etiqueta, st.session_state.get(k), grupo)
-
         def render_tabla_flujo_gases(titulo, key_prefix):
             st.markdown(f"#### {titulo}")
             c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1.5, 1.5])
@@ -598,16 +532,11 @@ if es_gas:
             with c3: val = st.number_input("val_vol", key=f"{key_prefix}_vol", label_visibility="collapsed")
             with c4: 
                 if val: st.write(f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%")
-            pesos_flujo = [2, 1, 1.5, 1.5]
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (cc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
-                                            f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%" if val else ""], pesos_flujo)
             return val
 
         flujo_vol_verif = render_tabla_flujo_gases("Verificación", "verif")
         req_ajuste_final = "SÍ" if (flujo_vol_verif and abs(flujo_vol_verif - flujo_ideal_vol)/flujo_ideal_vol > flujo_tol) else "No"
         st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
-        nota_pdf(S_FLU, f"¿Requiere ajuste volumétrico?: {req_ajuste_final}")
 
         if req_ajuste_final == "SÍ":
             render_tabla_flujo_gases("Ajuste", "ajus")
@@ -626,18 +555,12 @@ if es_externo:
                     img = Image.open(foto)
                     img.thumbnail((800, 800))
                     st.image(img, use_container_width=True)
-                    desc_foto = st.text_input("Descripción:", key=f"desc_foto_{i}", placeholder="Ej. Filtro reemplazado...")
-                    miniatura = img.convert("RGB")
-                    miniatura.thumbnail((500, 500))
-                    buf_foto = io.BytesIO()
-                    miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-                    _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), desc_foto))
+                    st.text_input("Descripción:", key=f"desc_foto_{i}", placeholder="Ej. Filtro reemplazado...")
 
 # ==========================================
 # 6. LIMPIEZA, REVISIÓN Y REEMPLAZO
 # ==========================================
 with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
-    pdf_ctx["sec"], pdf_ctx["sub"] = S_LIM, ""
     if es_gas:
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
         with c1: st.write("**Componente**")
@@ -666,7 +589,6 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
     
     elif es_particulas:
         st.markdown("<div class='header-tabla'>Limpieza de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Limpieza de:"
         fila_simple("Gabinete", "limp_gab")
         fila_simple("Tubo de la traza", "limp_tub")
         fila_simple("Cabezal", "limp_cab")
@@ -676,7 +598,6 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         fila_simple("Celda de medición", "limp_celd")
 
         st.markdown("<div class='header-tabla'>Revisión de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Revisión de:"
         fila_simple("Display", "rev_disp", "En óptimas condiciones")
         fila_simple("Calefactor de la Traza / factor de la Traza", "rev_calf", "Opera correctamente")
         fila_simple("Traza", "rev_traza", "En óptimas condiciones")
@@ -687,7 +608,6 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         fila_simple("Bomba", "rev_bomba", "Opera correctamente")
 
         st.markdown("<div class='header-tabla'>Reemplazo (en caso de ser necesario) de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Reemplazo (en caso de ser necesario) de:"
         if es_thermo: fila_simple("Ventilador de fuente", "reemp_vent")
         fila_simple("Cinta de vidrio / filtro", "reemp_cinta")
         if es_bam: fila_simple("O-rings", "reemp_orings")
@@ -708,10 +628,6 @@ if es_gas:
             st.text_input("Laboratorio", value=lab_cal2_def, key="lab_calib2")
             st.text_input("Técnico", value=tec_cal2_def, key="tec_calib2")
             st.date_input("Vigente hasta", datetime.date(2026, 8, 8), key="vig_calib2")
-        for etiqueta, k, grupo in [("Fabricante", "fab_calib2", ""), ("Modelo", "mod_calib2", ""), ("N/S Calibrador de Gases", "ns_calib2", ""),
-                                   ("Laboratorio", "lab_calib2", "Certificación"), ("Técnico", "tec_calib2", "Certificación"),
-                                   ("Vigente hasta", "vig_calib2", "Certificación")]:
-            kv(S_CAL, etiqueta, st.session_state.get(k), grupo)
 
     with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=req_cs):
         col_cs_izq, col_cs_der = st.columns(2)
@@ -730,15 +646,12 @@ if es_gas:
                 with c1: st.write("Zero Offset (ppb/ppm)")
                 with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed")
                 with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed")
-                for param, kp in [("Ganancia", "cs_g_"), ("Zero Offset (ppb/ppm)", "cs_z_")]:
-                    tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
             else:
                 for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset NO", "cs_zno_"), ("Zero Offset NO2", "cs_zno2_")]:
                     c1, c2, c3 = st.columns([2, 1, 1])
                     with c1: st.write(param)
                     with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed")
                     with c3: st.number_input("fin", key=f"{kp}f", label_visibility="collapsed")
-                    tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
 
         with col_cs_der:
             st.markdown("**Tiempo de respuesta al suministrar gas**")
@@ -747,7 +660,6 @@ if es_gas:
                 with c1: st.write(gas)
                 with c2: st.number_input("val", key=kp, label_visibility="collapsed")
                 with c3: st.write("min")
-                tabla_pdf(S_CS, "Tiempo de respuesta al suministrar gas", None, [gas, Caja(st.session_state.get(kp)), "min"], [1, 2, 1])
 
         col_cs_cero, col_cs_span = st.columns(2)
         dif_c = desv_s = None
@@ -775,13 +687,6 @@ if es_gas:
                     if -0.03 <= desv_s <= 0.03: st.success("Cumple ✅")
                     else: st.error("NO CUMPLE ❌")
 
-        tabla_pdf(S_CS, "Concentración Cero", ["Cero Gen", "Resp Cero", "Diferencia", "Resultado"],
-                  [Caja(val_cg), Caja(resp_c), f"{dif_c:.4f}" if dif_c is not None else "",
-                   _res(-cero_tol <= dif_c <= cero_tol if dif_c is not None else None)])
-        tabla_pdf(S_CS, "Concentración Span", ["Span Gen", "Resp Span", "% desv", "Resultado"],
-                  [Caja(val_sg), Caja(resp_s), f"{desv_s * 100:.2f}%" if desv_s is not None else "",
-                   _res(-0.03 <= desv_s <= 0.03 if desv_s is not None else None)])
-
     with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=req_comp):
         col_pts, col_res = st.columns([1.5, 1])
         with col_pts:
@@ -798,9 +703,6 @@ if es_gas:
                             desviaciones.append(dif / cal_val)
                             st.write(f"{(dif/cal_val)*100:.2f}%")
                 if ana_val is not None: x_vals.append(cal_val); y_vals.append(ana_val)
-                tabla_pdf(S_MUL, "", ["Calibrador", "Analizador", "Diferencia", "% Desviación"],
-                          [Caja(cal_val), Caja(ana_val), f"{ana_val - cal_val:.4f}" if ana_val is not None else "",
-                           f"{(ana_val - cal_val) / cal_val * 100:.2f}%" if ana_val is not None and cal_val else ""])
 
         m = b = r2 = promedio = None
         if len(x_vals) > 1:
@@ -818,11 +720,7 @@ if es_gas:
                 cond_m = 0.95 <= m <= 1.05
                 cond_b = -3.0 <= b <= 3.0
                 cond_prom = -0.03 <= promedio <= 0.03 if promedio else False
-                aprobado = cond_m and cond_b and cond_prom
-                for etiqueta, valor in [("Pendiente (m)", f"{m:.5f}"), ("Intercepto (b)", f"{b:.5f}"), ("R2", f"{r2:.6f}")]:
-                    tabla_pdf(S_MUL, "Regresión", None, [etiqueta, Caja(valor)], [1, 1])
-                tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
-                if aprobado: st.success("✅ MULTIPUNTO APROBADO")
+                if cond_m and cond_b and cond_prom: st.success("✅ MULTIPUNTO APROBADO")
                 else: st.error("❌ MULTIPUNTO RECHAZADO")
             else:
                 st.info("Ingresa los datos para regresión.")
@@ -831,7 +729,6 @@ if es_gas:
 # 9. REVISIÓN DETALLADA
 # ==========================================
 with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
-    pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
     with c1: st.write("**Componente**")
     with c2: st.write("**Estado**")
@@ -892,34 +789,12 @@ st.divider()
 # ==========================================
 # ENVÍO DE DATOS A GOOGLE DRIVE Y PDF
 # ==========================================
-def generar_pdf():
-    """Arma el PDF con lo registrado al dibujar el formato (mismas secciones y orden)."""
-    pdf_secciones.pop(S_RES, None)
-    _sec(S_RES)["firmas"] = True
-    _sec(S_RES)["textos"] = [("Observaciones Generales", st.session_state.get("res_obs"), "Mencionar anomalías..."),
-                             ("Conclusiones", st.session_state.get("res_conc"), "Mencionar conclusiones...")]
-    for grupo, campos in [("Técnico / Operador", [("Empresa/Ins", "e_tec"), ("Nombre", "n_tec"), ("Fecha", "f_tec")]),
-                          ("Supervisado / Revisado por", [("Institución", "e_sup"), ("Nombre", "n_sup"), ("Fecha", "f_sup")])]:
-        for etiqueta, k in campos:
-            kv(S_RES, etiqueta, st.session_state.get(k), grupo)
-
-    titulo = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
-    subtitulo = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
-    logo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png")
-    return construir_pdf(titulo, subtitulo, [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones], logo)
-
-def nombre_pdf():
-    gas_n = gas_sel[:2] if es_gas else f"PM_{pm_tipo}"
-    return f"Formato_{tipo_servicio[:3]}_{estacion_sel}_{gas_n}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-
-col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
-mensajes = st.columns(3)[2].container()  # los avisos van en una fila aparte, bajo el botón de Drive, para no mover los botones
+col_imprimir, col_drive = st.columns(2)
 
 with col_imprimir:
     components.html(
         """
-        <style>body { margin: 0; }</style>
-        <div style="display: flex; align-items: center; justify-content: center; height: 80px;" id="btn-imprimir">
+        <div style="text-align: center; margin-top: 10px;" id="btn-imprimir">
             <button onclick="window.parent.print()" style="padding: 14px 28px; font-size: 16px; font-weight: bold; background-color: #00B2A9; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
                 🖨️ Imprimir / Guardar PDF Visual
             </button>
@@ -927,73 +802,48 @@ with col_imprimir:
         """, height=80
     )
 
-with col_pdf:
-    sin_estacion = estacion_sel == "Selecciona una opción..."
-    st.download_button("📄 Descargar PDF del formato", data=b"" if sin_estacion else generar_pdf(), file_name=nombre_pdf(),
-                       mime="application/pdf", use_container_width=True, disabled=sin_estacion,
-                       help="Selecciona la Estación para habilitar la descarga" if sin_estacion else None)
-
-
-# ==========================================
-# RESPALDO EN DRIVE Y ENVÍO AL COORDINADOR (GMAIL)
-# ==========================================
-SCOPES_GOOGLE = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/gmail.send"]
-SECRETS_REQUERIDOS = ["google_oauth", "drive_carpeta_id", "correo_coordinador"]
-
-def credenciales_google():
-    """Credenciales OAuth de la cuenta que respalda en Drive y envía el correo (refresh token en Secrets)."""
-    cfg = st.secrets["google_oauth"]
-    return Credentials(None, refresh_token=cfg["refresh_token"], token_uri="https://oauth2.googleapis.com/token",
-                       client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
-
-def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
-    media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
-    return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute()
-
-def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
-    """Envía desde la cuenta autorizada. adjuntos: [(nombre, bytes, mimetype)]."""
-    mensaje = EmailMessage()
-    mensaje["To"], mensaje["Subject"] = destinatario, asunto
-    mensaje.set_content(cuerpo)
-    for nombre, datos, mimetype in adjuntos:
-        tipo, subtipo = mimetype.split("/")
-        mensaje.add_attachment(datos, maintype=tipo, subtype=subtipo, filename=nombre)
-    crudo = base64.urlsafe_b64encode(mensaje.as_bytes()).decode()
-    servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
-
 with col_drive:
-    if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True):
-        try:
-            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-        except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
-            faltan = SECRETS_REQUERIDOS
-        if sin_estacion:
-            mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
-        elif faltan:
-            mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
+    if st.button("☁️ Respaldar Reporte COMPLETO en Drive", use_container_width=True):
+        if estacion_sel == "Selecciona una opción...":
+            st.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
         else:
-            pdf_bytes, nombre_del_pdf = generar_pdf(), nombre_pdf()
-            enlace = ""
-            with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
+            with st.spinner("Empaquetando el 100% de los datos y subiendo a Google Drive..."):
                 try:
-                    servicio_drive = build("drive", "v3", credentials=credenciales_google())
-                    carpeta = st.secrets["drive_carpeta_id"]
-                    pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta)
-                    enlace = pdf_subido.get("webViewLink", "")
-                    st.success("✅ PDF guardado en Drive.")
+                    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+                    creds_dict = json.loads(st.secrets["google_credentials"])
+                    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+                    servicio_drive = build('drive', 'v3', credentials=creds)
+                    
+                    CARPETA_ID = 'PEGA_AQUI_EL_ID_DE_TU_CARPETA' 
+                    
+                    # Generación del nombre de archivo dinámico basado en la tabla solicitada
+                    gas_codigo = ""
+                    if gas_sel == "Ozono (O3)": gas_codigo = "O3"
+                    elif gas_sel == "Óxidos de Nitrógeno (NOx)": gas_codigo = "NOx"
+                    elif gas_sel == "Monóxido de Carbono (CO)": gas_codigo = "CO"
+                    elif gas_sel == "Dióxido de Azufre (SO2)": gas_codigo = "SO2"
+                    elif gas_sel == "PM BAM" or gas_sel == "PM Thermo": gas_codigo = pm_tipo
+                    
+                    # aaaa.mm.dd_TIPO_GAS_ESTACION_NS
+                    fecha_str = f"{año_f}.{mes_f}.{dia_f}"
+                    nombre_archivo = f"{fecha_str}_{nomenclatura_tipo}_{gas_codigo}_{estacion_sel.upper()}_{num_serie_val}.xlsx"
+                    
+                    estado_completo = []
+                    for key, value in st.session_state.items():
+                        if not key.startswith('_'):
+                            estado_completo.append({"Campo (ID)": key, "Valor Capturado": str(value)})
+                    df_estado = pd.DataFrame(estado_completo)
+                    
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        df_estado.to_excel(writer, sheet_name="Datos_Capturados", index=False)
+                        
+                    excel_buffer.seek(0)
+                    metadatos_archivo = {'name': nombre_archivo, 'parents': [CARPETA_ID]}
+                    media = MediaIoBaseUpload(excel_buffer, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
+                    archivo_subido = servicio_drive.files().create(body=metadatos_archivo, media_body=media, fields='id').execute()
+                    
+                    st.success(f"✅ ¡Reporte guardado en Drive como: {nombre_archivo}!")
+                    
                 except Exception as e:
-                    st.error(f"❌ No se pudo guardar en Drive: {type(e).__name__}: {e}")
-            with mensajes, st.spinner("Enviando el PDF al coordinador..."):
-                try:
-                    servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
-                    gas_txt = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
-                    cuerpo = (f"Buen día,\n\nSe adjunta el formato de calibración de {gas_txt} de la estación {estacion_sel}, "
-                              f"con fecha de servicio {fecha_ref}.\n"
-                              + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
-                              + "\nSaludos.")
-                    enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
-                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref}", cuerpo,
-                                  [(nombre_del_pdf, pdf_bytes, "application/pdf")])
-                    st.success("✅ Correo enviado al coordinador.")
-                except Exception as e:
-                    st.error(f"❌ No se pudo enviar el correo: {type(e).__name__}: {e}")
+                    st.error(f"❌ Error de conexión con Google Drive: Revise sus credenciales y Secrets.")
