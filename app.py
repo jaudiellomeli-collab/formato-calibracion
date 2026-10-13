@@ -79,7 +79,7 @@ st.sidebar.markdown("### 💾 Progreso en la Nube")
 st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
 correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", key="correo_borrador", placeholder="tecnico@jalisco.gob.mx")
 
-v_tipo = st.session_state.get('k_tipo', 'SIMAJ')
+v_tipo = st.session_state.get('k_tipo', 'Selecciona una opción...')
 v_est = st.session_state.get('k_est', 'Selecciona una opción...')
 v_gas = st.session_state.get('k_gas', 'Ozono (O3)')
 v_pm = st.session_state.get('k_pm', 'N/A')
@@ -185,8 +185,14 @@ equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": 
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
 # ==========================================
 st.write("<br>", unsafe_allow_html=True)
-tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["SIMAJ", "Mantenimiento Externo"], horizontal=True, key="k_tipo")
+st.markdown("#### Selecciona el Tipo de Servicio:")
+tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo"], horizontal=True, key="k_tipo", label_visibility="collapsed")
 es_externo = (tipo_servicio == "Mantenimiento Externo")
+
+if tipo_servicio == "Selecciona una opción...":
+    st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
+    st.stop()
+
 st.divider()
 
 col_logo, col_menu = st.columns([1, 2.5], gap="large")
@@ -237,8 +243,12 @@ fab_cal2_def = "" if es_externo else "ACOEM"
 mod_cal2_def = "" if es_externo else "Serinus Cal 3000"
 lab_cal2_def = "" if es_externo else "INECC"
 tec_cal2_def = "" if es_externo else "Humberto Bustamante"
+
+tec_empresa_def = "" if es_externo else "Secretaría de Medio Ambiente y Desarrollo Territorial"
 tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
 sup_nombre_def = "" if es_externo else "Beatriz Rodríguez Pérez"
+sup_empresa_def = "" if es_externo else "Desarrollo Territorial"
+
 
 # ==========================================
 # ENCABEZADO
@@ -350,16 +360,10 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         if gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas": mod_final = "ML9830"
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
-        fab_capturado = st.text_input("Fabricante", value=fab_final)
-        kv(S_DAT, "Fabricante", fab_capturado)
-        
-        mod_capturado = st.text_input("Modelo", value=mod_final)
-        kv(S_DAT, "Modelo", mod_capturado)
-        
+        fab_capturado = kv(S_DAT, "Fabricante", st.text_input("Fabricante", value=fab_final, key="fab_analizador"))
+        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final, key="mod_analizador"))
         num_serie_val = equipos_act.get(estacion_sel, "")
-        ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
-        kv(S_DAT, "N/S (Automático)", ns_capturado)
-        
+        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True, key="ns_analizador"))
         kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
@@ -444,7 +448,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         elif r_ini is not None: resultados_pg.append(r_ini)
 
     if gas_sel == "Ozono (O3)":
-        fila_libre("Flujo Estándar", "cc/min", "500", "o3_f_est")
+        fila_libre("Flujo Estándar", "scc/min", "500", "o3_f_est")
         procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "500", 487.5, 512.5, "o3_f_vol"))
         procesar_resultado(*fila_regla("Presión de gas", "Torr", "629", 619.0, 630.0, "o3_p_gas"))
         procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.4 - 4", 1.4, 4.0, "o3_v_ref"))
@@ -457,7 +461,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         fila_libre("Ganancia", "N/A", "N/A", "o3_gan")
         
     elif gas_sel == "Óxidos de Nitrógeno (NOx)":
-        fila_libre("Flujo Estándar", "cc/min", "650", "nox_f_est")
+        fila_libre("Flujo Estándar", "scc/min", "650", "nox_f_est")
         procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "650", 617.5, 682.5, "nox_f_vol"))
         procesar_resultado(*fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas"))
         procesar_resultado(*fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda"))
@@ -470,7 +474,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         fila_libre("Ganancia", "N/A", "N/A", "nox_gan")
         
     elif gas_sel == "Monóxido de Carbono (CO)":
-        fila_libre("Flujo Estándar", "cc/min", "1000", "co_f_est")
+        fila_libre("Flujo Estándar", "scc/min", "1000", "co_f_est")
         procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "1000", 975.0, 1025.0, "co_f_vol"))
         fila_libre("Presión de celda", "Torr", "631.7", "co_p_celda") 
         procesar_resultado(*fila_regla("IR Source", "Volt", "5 ± 0.5", 4.5, 5.5, "co_ir"))
@@ -485,7 +489,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         fila_libre("Ganancia", "N/A", "N/A", "co_gan")
         
     elif gas_sel == "Dióxido de Azufre (SO2)":
-        fila_libre("Flujo", "cc/min", str(flujo_ideal_vol), "so2_f_vol")
+        fila_libre("Flujo Estándar", "scc/min", str(flujo_ideal_vol), "so2_f_vol")
         fila_libre("Presión de gas", "Torr", "-", "so2_p_gas")
         procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.5 - 3.5", 1.5, 3.5, "so2_v_ref"))
         procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "34 - 36", 34.0, 36.0, "so2_c_lamp"))
@@ -532,6 +536,11 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Presión de vacío de la muestra", "mmHg", "-5 a 250", -5.0, 250.0, "th_pvac"))
         procesar_resultado(*fila_regla("Temperatura de flujo", "°C", "5 - 60", 5.0, 60.0, "th_tflujo"))
         procesar_resultado(*fila_regla("Temperatura de la tarjeta", "°C", "5 - 60", 5.0, 60.0, "th_ttarj"))
+
+    if len(resultados_pg) > 0:
+        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
+    else:
+        datos_resumen["Parámetros Generales"] = "Sin datos calculables"
 
 # ==========================================
 # 4. VERIFICACIÓN Y CALIBRACIÓN DE SENSORES Y FLUJO (PM)
@@ -712,7 +721,7 @@ if es_gas:
         def render_tabla_flujo_gases(titulo, key_prefix):
             st.markdown(f"#### {titulo}")
             c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1.5, 1.5])
-            with c1: st.write("Flujo Estandar (cc/min)")
+            with c1: st.write("Flujo Estandar (scc/min)")
             with c2: st.write("-")
             with c3: st.number_input("val_est", key=f"{key_prefix}_est", label_visibility="collapsed")
             with c4: st.write("-")
@@ -725,16 +734,23 @@ if es_gas:
             with c4: 
                 if val: st.write(f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%")
             pesos_flujo = [2, 1, 1.5, 1.5]
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (cc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
+            
+            c_est = st.session_state.get(f"{key_prefix}_est")
+            
+            tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
+            
+            val_vol_pdf = f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%" if val else ""
+            res_pdf = _res(abs(val - flujo_ideal_vol)/flujo_ideal_vol <= flujo_tol) if val else ""
+            
             tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
-                                            f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%" if val else ""], pesos_flujo)
+                                            val_vol_pdf], pesos_flujo)
             return val
 
         flujo_vol_verif = render_tabla_flujo_gases("Verificación", "verif")
         req_ajuste_final = "SÍ" if (flujo_vol_verif and abs(flujo_vol_verif - flujo_ideal_vol)/flujo_ideal_vol > flujo_tol) else "No"
         st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
         nota_pdf(S_FLU, f"¿Requiere ajuste volumétrico?: {req_ajuste_final}")
-
+        
         if req_ajuste_final == "SÍ":
             render_tabla_flujo_gases("Ajuste", "ajus")
 
@@ -758,11 +774,36 @@ if es_externo:
                     buf_foto = io.BytesIO()
                     miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
                     _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), desc_foto))
+                    
+        st.markdown("**Evidencia de Cero-Span:**")
+        foto_cs = st.file_uploader("Sube foto de Cero-Span", type=['png', 'jpg', 'jpeg'], key="foto_cs")
+        if foto_cs:
+            img = Image.open(foto_cs)
+            img.thumbnail((800, 800))
+            st.image(img, use_container_width=True)
+            miniatura = img.convert("RGB")
+            miniatura.thumbnail((500, 500))
+            buf_foto = io.BytesIO()
+            miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
+            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Evidencia de Cero-Span"))
+            
+        st.markdown("**Gráfica de Calibración (Multipunto):**")
+        foto_graf = st.file_uploader("Sube foto de la gráfica generada", type=['png', 'jpg', 'jpeg'], key="foto_graf")
+        if foto_graf:
+            img = Image.open(foto_graf)
+            img.thumbnail((800, 800))
+            st.image(img, use_container_width=True)
+            miniatura = img.convert("RGB")
+            miniatura.thumbnail((500, 500))
+            buf_foto = io.BytesIO()
+            miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
+            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Gráfica de Calibración Multipunto"))
 
 # ==========================================
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
 # ==========================================
 def bloque_revision_detallada():
+    """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
@@ -786,7 +827,7 @@ def bloque_revision_detallada():
                 fila_comp("Filtro óptico", "d_fopt")
                 fila_comp("Tarjetas electrónicas", "d_tarj")
                 fila_comp("Fuente de voltaje", "d_fvolt")
-            else: 
+            else: # NOx y SO2
                 fila_comp("Bomba de Vacío externa", "d_bomba_gn")
                 fila_comp("Generador de Ozono", "d_gen_gn")
                 fila_comp("Permapure", "d_perm_gn")
@@ -921,7 +962,7 @@ if es_gas:
             st.markdown("#### Concentración Cero")
             c1, c2, c3 = st.columns(3)
             val_cg_ideal = 0.001 if gas_sel != "Dióxido de Azufre (SO2)" else 0.0001
-            with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True)
+            with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True, key="vcg")
             with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
             with c3:
                 if resp_c is not None:
@@ -932,7 +973,7 @@ if es_gas:
         with col_cs_span:
             st.markdown("#### Concentración Span")
             c1, c2, c3 = st.columns(3)
-            with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True)
+            with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True, key="vsg")
             with c2: resp_s = st.number_input("Resp Span", value=0.000, format="%.4f", key="ras")
             with c3:
                 if resp_s is not None and val_sg != 0:
@@ -954,8 +995,8 @@ if es_gas:
             x_vals, y_vals, desviaciones = [], [], []
             for i, cal_val in enumerate(puntos_multipunto):
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
-                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}_{gas_sel}", format="%.4f", label_visibility="collapsed")
+                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}", label_visibility="collapsed")
+                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}", format="%.4f", label_visibility="collapsed")
                 with c3:
                     if ana_val is not None:
                         dif = ana_val - cal_val
@@ -1011,22 +1052,22 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
     c1, c2, c3 = st.columns(3, gap="large")
     with c1:
         st.markdown("<div class='header-firma'>Técnico / Operador</div>", unsafe_allow_html=True)
-        st.text_input("Empresa/Ins", value="Secretaría de Medio Ambiente y Desarrollo Territorial" if not es_externo else "", key="e_tec")
+        st.text_input("Empresa/Ins", value=tec_empresa_def, key="e_tec")
         st.text_input("Nombre", value=tec_nombre_def, key="n_tec")
         st.date_input("Fecha", datetime.date.today(), key="f_tec")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
         
     with c2:
         st.markdown("<div class='header-firma'>Supervisado / Revisado por</div>", unsafe_allow_html=True)
-        st.text_input("Institución", value="Desarrollo Territorial" if not es_externo else "", key="e_sup")
-        st.text_input("Nombre", value=sup_nombre_def, key="n_sup")
+        st.text_input("Institución", value="SEMADET", disabled=es_externo, key="e_sup")
+        st.text_input("Nombre", value=sup_nombre_def if not es_externo else "", key="n_sup")
         st.date_input("Fecha", datetime.date.today(), key="f_sup")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
 
     with c3:
         st.markdown("<div class='header-firma'>Supervisor SEMADET</div>", unsafe_allow_html=True)
-        st.text_input("Cargo", value="Supervisor de la Secretaría de Medio Ambiente y Desarrollo Territorial", key="c_sema")
-        st.text_input("Nombre", value="", key="n_sema", placeholder="Nombre del supervisor...")
+        st.text_input("Cargo", value="Coordinadora de SIMAJ", key="c_sema")
+        st.text_input("Nombre", value="Bety", key="n_sema", placeholder="Nombre del supervisor...")
         st.date_input("Fecha", datetime.date.today(), key="f_sema")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
 
