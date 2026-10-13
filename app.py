@@ -75,12 +75,10 @@ def credenciales_google():
 # ==========================================
 # PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
 # ==========================================
-# Se coloca aquí arriba para evitar el "NameError" al modificar el Session State de elementos ya dibujados
 st.sidebar.markdown("### 💾 Progreso en la Nube")
 st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
 correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", key="correo_borrador", placeholder="tecnico@jalisco.gob.mx")
 
-# Obtenemos las selecciones actuales de memoria para saber "Qué" estamos guardando/cargando
 v_tipo = st.session_state.get('k_tipo', 'SIMAJ')
 v_est = st.session_state.get('k_est', 'Selecciona una opción...')
 v_gas = st.session_state.get('k_gas', 'Ozono (O3)')
@@ -116,7 +114,6 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
                         
                     datos_actuales = {}
                     for k, v in st.session_state.items():
-                        # Evitamos guardar los selectores principales para no sobreescribir la intención del usuario al cargar
                         if k.startswith('_') or k in ["FormSubmitter", "correo_borrador", "k_tipo", "k_gas", "k_pm", "k_est"]: continue
                         if isinstance(v, (str, int, float, bool, type(None))): datos_actuales[k] = v
                         elif isinstance(v, (datetime.date, datetime.time)): datos_actuales[k] = str(v)
@@ -155,7 +152,7 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
                     if vista_actual in dict_global:
                         datos_vista = dict_global[vista_actual]
                         for k, v in datos_vista.items():
-                            if k in ["k_tipo", "k_gas", "k_pm", "k_est", "correo_borrador"]: continue # Proteger controles
+                            if k in ["k_tipo", "k_gas", "k_pm", "k_est", "correo_borrador"]: continue 
                             if isinstance(v, str):
                                 if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
                                     try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
@@ -353,10 +350,16 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         if gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas": mod_final = "ML9830"
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
-        fab_capturado = kv(S_DAT, "Fabricante", st.text_input("Fabricante", value=fab_final, key="fab_analizador"))
-        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final, key="mod_analizador"))
+        fab_capturado = st.text_input("Fabricante", value=fab_final)
+        kv(S_DAT, "Fabricante", fab_capturado)
+        
+        mod_capturado = st.text_input("Modelo", value=mod_final)
+        kv(S_DAT, "Modelo", mod_capturado)
+        
         num_serie_val = equipos_act.get(estacion_sel, "")
-        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True, key="ns_analizador"))
+        ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
+        kv(S_DAT, "N/S (Automático)", ns_capturado)
+        
         kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
@@ -634,15 +637,15 @@ if es_particulas:
             cal_targets = [15.0, 18.43, 16.67]
             for idx, target in enumerate(cal_targets):
                 c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
-                with c1: st.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}")
-                with c2: st.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}")
+                with c1: st.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
+                with c2: st.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
                 with c3:
-                    if idx == 0: st.text_area("Observaciones Generales", key="bam_f_obs", height=90, label_visibility="collapsed")
+                    if idx == 0: st.text_area("Observaciones Generales", key=f"bam_f_obs_{pm_tipo}", height=90, label_visibility="collapsed")
                 with c4:
-                    if idx == 0: st.radio("¿Calibró?", ["No", "Sí"], key="bam_f_cal", horizontal=True, label_visibility="collapsed")
+                    if idx == 0: st.radio("¿Calibró?", ["No", "Sí"], key=f"bam_f_cal_{pm_tipo}", horizontal=True, label_visibility="collapsed")
                 tabla_pdf(S_SENS, "Flujo en Litros por Minuto", ["Calibrador (lpm)", "Monitor (lpm)", "Comentarios", "Requirió Ajuste"],
-                          [Caja(target), Caja(st.session_state.get(f"bam_fm_{idx}")),
-                           Caja(st.session_state.get("bam_f_obs")) if idx == 0 else "", Caja(st.session_state.get("bam_f_cal")) if idx == 0 else ""],
+                          [Caja(target), Caja(st.session_state.get(f"bam_fm_{idx}_{pm_tipo}")),
+                           Caja(st.session_state.get(f"bam_f_obs_{pm_tipo}")) if idx == 0 else "", Caja(st.session_state.get(f"bam_f_cal_{pm_tipo}")) if idx == 0 else ""],
                           [1, 1, 2, 1])
             
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
@@ -760,7 +763,6 @@ if es_externo:
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
 # ==========================================
 def bloque_revision_detallada():
-    """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
@@ -784,7 +786,7 @@ def bloque_revision_detallada():
                 fila_comp("Filtro óptico", "d_fopt")
                 fila_comp("Tarjetas electrónicas", "d_tarj")
                 fila_comp("Fuente de voltaje", "d_fvolt")
-            else: # NOx y SO2
+            else: 
                 fila_comp("Bomba de Vacío externa", "d_bomba_gn")
                 fila_comp("Generador de Ozono", "d_gen_gn")
                 fila_comp("Permapure", "d_perm_gn")
@@ -918,7 +920,8 @@ if es_gas:
         with col_cs_cero:
             st.markdown("#### Concentración Cero")
             c1, c2, c3 = st.columns(3)
-            with c1: val_cg = st.number_input("Cero Gen", value=0.001 if gas_sel != "Dióxido de Azufre (SO2)" else 0.0001, disabled=True, key="vcg")
+            val_cg_ideal = 0.001 if gas_sel != "Dióxido de Azufre (SO2)" else 0.0001
+            with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True)
             with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
             with c3:
                 if resp_c is not None:
@@ -929,7 +932,7 @@ if es_gas:
         with col_cs_span:
             st.markdown("#### Concentración Span")
             c1, c2, c3 = st.columns(3)
-            with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True, key="vsg")
+            with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True)
             with c2: resp_s = st.number_input("Resp Span", value=0.000, format="%.4f", key="ras")
             with c3:
                 if resp_s is not None and val_sg != 0:
@@ -951,8 +954,8 @@ if es_gas:
             x_vals, y_vals, desviaciones = [], [], []
             for i, cal_val in enumerate(puntos_multipunto):
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}", label_visibility="collapsed")
-                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}", format="%.4f", label_visibility="collapsed")
+                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
+                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}_{gas_sel}", format="%.4f", label_visibility="collapsed")
                 with c3:
                     if ana_val is not None:
                         dif = ana_val - cal_val
