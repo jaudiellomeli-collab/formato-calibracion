@@ -89,7 +89,6 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
             if faltan: st.sidebar.error("Faltan credenciales de Google.")
             else:
                 with st.spinner("Guardando..."):
-                    # Extraer solo lo que se pueda guardar
                     datos = {}
                     for k, v in st.session_state.items():
                         if k.startswith('_') or k == "FormSubmitter": continue
@@ -126,7 +125,6 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
                     contenido = req.execute()
                     datos = json.loads(contenido.decode('utf-8'))
                     
-                    # Convertir textos de vuelta a Fechas/Horas
                     for k, v in datos.items():
                         if isinstance(v, str):
                             if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
@@ -138,7 +136,7 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
                                     try: v = datetime.datetime.strptime(v, '%H:%M').time()
                                     except: pass
                         st.session_state[k] = v
-                    st.rerun() # Refresca la pantalla con los nuevos datos
+                    st.rerun() 
                 else:
                     st.sidebar.warning("No se encontró progreso.")
         except Exception as e:
@@ -236,11 +234,10 @@ S_MUL = "Calibración multipunto"
 S_DET = "Revisión detallada de componentes"
 S_RES = "Resumen y firmas finales"
 
-# ORDEN DINÁMICO DEL PDF (Para coincidir con el movimiento de la sección Detallada)
 ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_FOT, S_LIM]
-if es_externo: ORDEN_PDF.append(S_DET) # Si es externo, S_DET va aquí
+if es_externo: ORDEN_PDF.append(S_DET)
 ORDEN_PDF.extend([S_CAL, S_CS, S_MUL])
-if not es_externo: ORDEN_PDF.append(S_DET) # Si es SIMAJ, S_DET va acá
+if not es_externo: ORDEN_PDF.append(S_DET)
 ORDEN_PDF.append(S_RES)
 
 pdf_secciones = {}
@@ -541,7 +538,8 @@ if es_particulas:
                         if c_val is not None and m_val is not None: st.write(f"{(m_val - c_val):.2f}")
                         else: st.write("-")
                     tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Caja(c_val), Caja(m_val), f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-", ""], [1, 1, 1, 2])
+                              [Caja(c_val), Caja(m_val), f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-", ""],
+                              [1, 1, 1, 2])
                     if c_val is not None: cal_v.append(c_val)
                     if m_val is not None: mon_v.append(m_val)
                 
@@ -562,7 +560,8 @@ if es_particulas:
                     obs_sensor = st.text_input("Comentarios", key=f"{titulo}_obs", placeholder="Comentarios...", label_visibility="collapsed")
                     dif_pdf = Alerta(f"{prom_m - prom_c:.2f}", abs(prom_m - prom_c) <= limite_dif) if prom_c and prom_m else "-"
                     tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Neg(f"{prom_c:.2f}" if prom_c else "Promedio"), Neg(f"{prom_m:.2f}" if prom_m else "Promedio"), dif_pdf, Caja(obs_sensor, "Comentarios...")], [1, 1, 1, 2])
+                              [Neg(f"{prom_c:.2f}" if prom_c else "Promedio"), Neg(f"{prom_m:.2f}" if prom_m else "Promedio"), dif_pdf,
+                               Caja(obs_sensor, "Comentarios...")], [1, 1, 1, 2])
                     nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
                     st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
             
@@ -588,7 +587,8 @@ if es_particulas:
                 enc_baro = ["Medición", "Calibrador", "Monitor"]
                 tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Lectura", Caja(c_bar1), Caja(m_bar1)])
                 tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Calibración", Caja(c_bar2), Caja(m_bar2)])
-                tabla_pdf(S_SENS, "Flujo", ["Calibrador", "Monitor", "% Desviación"], [Caja(f_cal), Caja(f_mon), f"{((f_mon-f_cal)/f_cal)*100:.2f}%" if f_cal and f_mon else ""])
+                tabla_pdf(S_SENS, "Flujo", ["Calibrador", "Monitor", "% Desviación"],
+                          [Caja(f_cal), Caja(f_mon), f"{((f_mon-f_cal)/f_cal)*100:.2f}%" if f_cal and f_mon else ""])
                 nota_pdf(S_SENS, "Flujo: el valor promedio debe estar entre 16.00 y 17.34 Lpm")
 
         elif es_bam:
@@ -610,7 +610,9 @@ if es_particulas:
                     if idx == 0: st.radio("¿Calibró?", ["No", "Sí"], key="bam_f_cal", horizontal=True, label_visibility="collapsed")
                 tabla_pdf(S_SENS, "Flujo en Litros por Minuto", ["Calibrador (lpm)", "Monitor (lpm)", "Comentarios", "Requirió Ajuste"],
                           [Caja(target), Caja(st.session_state.get(f"bam_fm_{idx}")),
-                           Caja(st.session_state.get("bam_f_obs")) if idx == 0 else "", Caja(st.session_state.get("bam_f_cal")) if idx == 0 else ""], [1, 1, 2, 1])
+                           Caja(st.session_state.get("bam_f_obs")) if idx == 0 else "", Caja(st.session_state.get("bam_f_cal")) if idx == 0 else ""],
+                          [1, 1, 2, 1])
+            
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
 
@@ -623,6 +625,7 @@ if es_particulas:
         with col_cm2:
             st.date_input("Fecha de Certificación de Foils", datetime.date(2025, 11, 12), key="cm_fecha")
             st.number_input("Mass Coefficient Inicial", value=7000.0, key="cm_mass_ini")
+        
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("**Lectura**")
@@ -657,6 +660,7 @@ if es_gas:
             st.text_input("Fabricante", value=fab_cal1_def, key="fab_cal1")
             st.text_input("Modelo", value=mod_cal1_def, key="mod_cal1")
             st.text_input("N/S Calibrador de Flujo", key="ns_cal1")
+
         with col_cal2:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value=lab_cal1_def, key="lab_cal1")
@@ -666,7 +670,8 @@ if es_gas:
 
         for etiqueta, k, grupo in [("Fabricante", "fab_cal1", "Calibrador de Flujo"), ("Modelo", "mod_cal1", "Calibrador de Flujo"),
                                    ("N/S Calibrador de Flujo", "ns_cal1", "Calibrador de Flujo"), ("Laboratorio", "lab_cal1", "Certificación"),
-                                   ("Técnico", "tec_cal1", "Certificación"), ("Vigente hasta", "vig_cal1", "Certificación"), ("No de certificado", "cert_cal1", "Certificación")]:
+                                   ("Técnico", "tec_cal1", "Certificación"), ("Vigente hasta", "vig_cal1", "Certificación"),
+                                   ("No de certificado", "cert_cal1", "Certificación")]:
             kv(S_FLU, etiqueta, st.session_state.get(k), grupo)
 
         def render_tabla_flujo_gases(titulo, key_prefix):
@@ -677,6 +682,7 @@ if es_gas:
             with c3: st.number_input("val_est", key=f"{key_prefix}_est", label_visibility="collapsed")
             with c4: st.write("-")
             with c5: st.write("-")
+
             c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1.5, 1.5])
             with c1: st.write("Flujo Volumétrico (cc/min)")
             with c2: st.write(str(flujo_ideal_vol))
@@ -693,14 +699,16 @@ if es_gas:
         req_ajuste_final = "SÍ" if (flujo_vol_verif and abs(flujo_vol_verif - flujo_ideal_vol)/flujo_ideal_vol > flujo_tol) else "No"
         st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
         nota_pdf(S_FLU, f"¿Requiere ajuste volumétrico?: {req_ajuste_final}")
-        if req_ajuste_final == "SÍ": render_tabla_flujo_gases("Ajuste", "ajus")
+
+        if req_ajuste_final == "SÍ":
+            render_tabla_flujo_gases("Ajuste", "ajus")
 
 # ==========================================
 # EVIDENCIAS FOTOGRÁFICAS (SÓLO MANTENIMIENTO EXTERNO)
 # ==========================================
 if es_externo:
     with st.expander("📷 EVIDENCIAS FOTOGRÁFICAS (PROVEEDOR)", expanded=True):
-        st.markdown("**Sube las fotografías que evidencian el mantenimiento.**")
+        st.markdown("**Sube las fotografías que evidencian el mantenimiento (Se comprimirán para no saturar la memoria).**")
         fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
         if fotos_subidas:
             columnas_fotos = st.columns(3)
@@ -965,7 +973,7 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
 
     st.write("<br>", unsafe_allow_html=True)
     
-    c1, c2 = st.columns(2, gap="large")
+    c1, c2, c3 = st.columns(3, gap="large")
     with c1:
         st.markdown("<div class='header-firma'>Técnico / Operador</div>", unsafe_allow_html=True)
         st.text_input("Empresa/Ins", value="Secretaría de Medio Ambiente y Desarrollo Territorial" if not es_externo else "", key="e_tec")
@@ -980,6 +988,13 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
         st.date_input("Fecha", datetime.date.today(), key="f_sup")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
 
+    with c3:
+        st.markdown("<div class='header-firma'>Supervisor SEMADET</div>", unsafe_allow_html=True)
+        st.text_input("Cargo", value="Supervisor de la Secretaría de Medio Ambiente y Desarrollo Territorial", key="c_sema")
+        st.text_input("Nombre", value="", key="n_sema", placeholder="Nombre del supervisor...")
+        st.date_input("Fecha", datetime.date.today(), key="f_sema")
+        st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
+
 st.divider()
 
 # ==========================================
@@ -990,8 +1005,10 @@ def generar_pdf():
     _sec(S_RES)["firmas"] = True
     _sec(S_RES)["textos"] = [("Observaciones Generales", st.session_state.get("res_obs"), "Mencionar anomalías..."),
                              ("Conclusiones", st.session_state.get("res_conc"), "Mencionar conclusiones...")]
+    
     for grupo, campos in [("Técnico / Operador", [("Empresa/Ins", "e_tec"), ("Nombre", "n_tec"), ("Fecha", "f_tec")]),
-                          ("Supervisado / Revisado por", [("Institución", "e_sup"), ("Nombre", "n_sup"), ("Fecha", "f_sup")])]:
+                          ("Supervisado / Revisado por", [("Institución", "e_sup"), ("Nombre", "n_sup"), ("Fecha", "f_sup")]),
+                          ("Supervisor SEMADET", [("Cargo", "c_sema"), ("Nombre", "n_sema"), ("Fecha", "f_sema")])]:
         for etiqueta, k in campos: kv(S_RES, etiqueta, st.session_state.get(k), grupo)
 
     titulo = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
@@ -1081,5 +1098,6 @@ with col_drive:
                     archivo_subido = servicio_drive.files().create(body={'name': nombre_archivo_excel, 'parents': [CARPETA_ID]}, media_body=media, fields='id').execute()
                     
                     st.success(f"✅ ¡Reporte guardado en Drive como: {nombre_archivo_excel}!")
+                    
                 except Exception as e:
                     st.error(f"❌ Error de conexión con Google Drive: Revise sus credenciales y Secrets.")
