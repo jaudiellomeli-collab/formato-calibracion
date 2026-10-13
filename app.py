@@ -309,10 +309,13 @@ if not es_externo:
         req_cs = fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
         req_comp = fila_historico("Mantenimiento Completo", "completo", datetime.date(2025, 1, 1), 6)
 
-# Variable maestra para decidir la Nomenclatura Dinámica VA / CS / CM
-nomenclatura_tipo = "VA" # Por defecto es Verificación Ambiental (Básico)
-if req_comp: nomenclatura_tipo = "CM" # Si se hizo Calibración Multipunto / Completo
-elif req_cs: nomenclatura_tipo = "CS" # Si se hizo Cero-Span pero no Multipunto
+# ==========================================
+# CÁLCULO DE NOMENCLATURA DINÁMICA (CLAVE)
+# ==========================================
+if es_gas:
+    nomenclatura_tipo = "CM" if req_comp else ("CS" if req_cs else "VA")
+else:
+    nomenclatura_tipo = "CM" if req_comp else "VC"
 
 # ==========================================
 # 3. PARÁMETROS GENERALES
@@ -928,14 +931,31 @@ def generar_pdf():
     logo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png")
     return construir_pdf(titulo, subtitulo, [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones], logo)
 
+def nombre_base_archivo():
+    """Genera el nombre base según la nomenclatura solicitada aaaa.mm.dd_CLAVE_GAS_ESTACION_NS"""
+    # Abreviaturas automáticas para el nombre del archivo
+    estaciones_abrev = {
+        "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN", 
+        "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM", 
+        "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN", 
+        "Tlaquepaque": "TLA"
+    }
+    est_cod = estaciones_abrev.get(estacion_sel, "XXX")
+    
+    if es_gas:
+        gas_cod = {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", 
+                   "Monóxido de Carbono (CO)": "CO", "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, "")
+    else:
+        marca_pm = "BAM" if es_bam else "Thermo"
+        gas_cod = f"{pm_tipo}_{marca_pm}"
+        
+    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{num_serie_val}"
+
 def nombre_pdf():
-    """Nomenclatura aaaa.mm.dd_TIPO_GAS_ESTACION_NS, donde TIPO es VA / CS / CM."""
-    gas_codigo = {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", "Monóxido de Carbono (CO)": "CO",
-                  "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, pm_tipo)
-    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_codigo}_{estacion_sel.upper()}_{num_serie_val}.pdf"
+    return f"{nombre_base_archivo()}.pdf"
 
 col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
-mensajes = st.columns(3)[2].container()  # los avisos van en una fila aparte, bajo el botón de Drive, para no mover los botones
+mensajes = st.columns(3)[2].container()  
 
 with col_imprimir:
     components.html(
@@ -955,7 +975,6 @@ with col_pdf:
                        mime="application/pdf", use_container_width=True, disabled=sin_estacion,
                        help="Selecciona la Estación para habilitar la descarga" if sin_estacion else None)
 
-
 # ==========================================
 # RESPALDO EN DRIVE Y ENVÍO AL COORDINADOR (GMAIL)
 # ==========================================
@@ -963,7 +982,6 @@ SCOPES_GOOGLE = ["https://www.googleapis.com/auth/drive.file", "https://www.goog
 SECRETS_REQUERIDOS = ["google_oauth", "drive_carpeta_id", "correo_coordinador"]
 
 def credenciales_google():
-    """Credenciales OAuth de la cuenta que respalda en Drive y envía el correo (refresh token en Secrets)."""
     cfg = st.secrets["google_oauth"]
     return Credentials(None, refresh_token=cfg["refresh_token"], token_uri="https://oauth2.googleapis.com/token",
                        client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
@@ -973,7 +991,6 @@ def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
     return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute()
 
 def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
-    """Envía desde la cuenta autorizada. adjuntos: [(nombre, bytes, mimetype)]."""
     mensaje = EmailMessage()
     mensaje["To"], mensaje["Subject"] = destinatario, asunto
     mensaje.set_content(cuerpo)
@@ -984,38 +1001,43 @@ def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
     servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
 
 with col_drive:
-    if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True):
+    if st.button("☁️ Respaldar Reporte COMPLETO en Drive", use_container_width=True):
         try:
             faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-        except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
+        except Exception:  
             faltan = SECRETS_REQUERIDOS
+            
         if sin_estacion:
             mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
-        elif faltan:
-            mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
+        # Se omitió la validación de Secrets para Drive si se usa la lógica anterior de JSON, 
+        # pero adaptamos la subida combinando el Excel completo con la Nomenclatura oficial
         else:
-            pdf_bytes, nombre_del_pdf = generar_pdf(), nombre_pdf()
-            enlace = ""
-            with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
+            with st.spinner("Empaquetando el 100% de los datos y subiendo a Google Drive..."):
                 try:
-                    servicio_drive = build("drive", "v3", credentials=credenciales_google())
-                    carpeta = st.secrets["drive_carpeta_id"]
-                    pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta)
-                    enlace = pdf_subido.get("webViewLink", "")
-                    st.success("✅ PDF guardado en Drive.")
+                    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+                    creds_dict = json.loads(st.secrets["google_credentials"])
+                    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+                    servicio_drive = build('drive', 'v3', credentials=creds)
+                    
+                    CARPETA_ID = 'PEGA_AQUI_EL_ID_DE_TU_CARPETA' 
+                    nombre_archivo_excel = f"{nombre_base_archivo()}.xlsx"
+                    
+                    estado_completo = []
+                    for key, value in st.session_state.items():
+                        if not key.startswith('_'):
+                            estado_completo.append({"Campo (ID)": key, "Valor Capturado": str(value)})
+                    df_estado = pd.DataFrame(estado_completo)
+                    
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        df_estado.to_excel(writer, sheet_name="Datos_Capturados", index=False)
+                        
+                    excel_buffer.seek(0)
+                    metadatos_archivo = {'name': nombre_archivo_excel, 'parents': [CARPETA_ID]}
+                    media = MediaIoBaseUpload(excel_buffer, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
+                    archivo_subido = servicio_drive.files().create(body=metadatos_archivo, media_body=media, fields='id').execute()
+                    
+                    st.success(f"✅ ¡Reporte guardado en Drive como: {nombre_archivo_excel}!")
+                    
                 except Exception as e:
-                    st.error(f"❌ No se pudo guardar en Drive: {type(e).__name__}: {e}")
-            with mensajes, st.spinner("Enviando el PDF al coordinador..."):
-                try:
-                    servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
-                    gas_txt = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
-                    cuerpo = (f"Buen día,\n\nSe adjunta el formato de calibración de {gas_txt} de la estación {estacion_sel}, "
-                              f"con fecha de servicio {fecha_ref}.\n"
-                              + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
-                              + "\nSaludos.")
-                    enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
-                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref}", cuerpo,
-                                  [(nombre_del_pdf, pdf_bytes, "application/pdf")])
-                    st.success("✅ Correo enviado al coordinador.")
-                except Exception as e:
-                    st.error(f"❌ No se pudo enviar el correo: {type(e).__name__}: {e}")
+                    st.error(f"❌ Error de conexión con Google Drive: Revise sus credenciales y Secrets.")
