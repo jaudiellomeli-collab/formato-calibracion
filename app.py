@@ -73,6 +73,108 @@ def credenciales_google():
                        client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
 
 # ==========================================
+# PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
+# ==========================================
+# Se coloca aquí arriba para evitar el "NameError" al modificar el Session State de elementos ya dibujados
+st.sidebar.markdown("### 💾 Progreso en la Nube")
+st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
+correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", key="correo_borrador", placeholder="tecnico@jalisco.gob.mx")
+
+# Obtenemos las selecciones actuales de memoria para saber "Qué" estamos guardando/cargando
+v_tipo = st.session_state.get('k_tipo', 'SIMAJ')
+v_est = st.session_state.get('k_est', 'Selecciona una opción...')
+v_gas = st.session_state.get('k_gas', 'Ozono (O3)')
+v_pm = st.session_state.get('k_pm', 'N/A')
+vista_actual = f"{v_tipo}_{v_est}_{v_gas}_{v_pm}"
+
+col_btn1, col_btn2 = st.sidebar.columns(2)
+if col_btn1.button("📥 Guardar", use_container_width=True):
+    if not correo_borrador:
+        st.sidebar.error("Ingresa un correo.")
+    elif v_est == "Selecciona una opción...":
+        st.sidebar.error("Selecciona una Estación en la ventana principal primero.")
+    else:
+        try:
+            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
+            if faltan: st.sidebar.error("Faltan credenciales de Google en Secrets.")
+            else:
+                with st.spinner("Guardando vista actual..."):
+                    servicio = build("drive", "v3", credentials=credenciales_google())
+                    carpeta = st.secrets["drive_carpeta_id"]
+                    nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
+                    
+                    res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
+                    archivos = res.get('files', [])
+                    
+                    dict_global = {}
+                    archivo_id = None
+                    if archivos:
+                        archivo_id = archivos[0]['id']
+                        req = servicio.files().get_media(fileId=archivo_id)
+                        contenido = req.execute()
+                        dict_global = json.loads(contenido.decode('utf-8'))
+                        
+                    datos_actuales = {}
+                    for k, v in st.session_state.items():
+                        # Evitamos guardar los selectores principales para no sobreescribir la intención del usuario al cargar
+                        if k.startswith('_') or k in ["FormSubmitter", "correo_borrador", "k_tipo", "k_gas", "k_pm", "k_est"]: continue
+                        if isinstance(v, (str, int, float, bool, type(None))): datos_actuales[k] = v
+                        elif isinstance(v, (datetime.date, datetime.time)): datos_actuales[k] = str(v)
+                        
+                    dict_global[vista_actual] = datos_actuales
+                    
+                    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
+                    if archivo_id:
+                        servicio.files().update(fileId=archivo_id, media_body=media).execute()
+                    else:
+                        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
+                        
+                    st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}.")
+        except Exception as e:
+            st.sidebar.error(f"Error al guardar: {e}")
+
+if col_btn2.button("📤 Cargar", use_container_width=True):
+    if not correo_borrador:
+        st.sidebar.error("Ingresa un correo.")
+    elif v_est == "Selecciona una opción...":
+        st.sidebar.error("Selecciona la Estación y Equipo a cargar en la ventana principal.")
+    else:
+        try:
+            with st.spinner("Cargando..."):
+                servicio = build("drive", "v3", credentials=credenciales_google())
+                carpeta = st.secrets["drive_carpeta_id"]
+                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
+                
+                res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
+                archivos = res.get('files', [])
+                if archivos:
+                    req = servicio.files().get_media(fileId=archivos[0]['id'])
+                    contenido = req.execute()
+                    dict_global = json.loads(contenido.decode('utf-8'))
+                    
+                    if vista_actual in dict_global:
+                        datos_vista = dict_global[vista_actual]
+                        for k, v in datos_vista.items():
+                            if k in ["k_tipo", "k_gas", "k_pm", "k_est", "correo_borrador"]: continue # Proteger controles
+                            if isinstance(v, str):
+                                if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+                                    try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
+                                    except: pass
+                                elif re.match(r'^\d{2}:\d{2}:\d{2}$', v) or re.match(r'^\d{2}:\d{2}$', v):
+                                    try: v = datetime.datetime.strptime(v, '%H:%M:%S').time()
+                                    except:
+                                        try: v = datetime.datetime.strptime(v, '%H:%M').time()
+                                        except: pass
+                            st.session_state[k] = v
+                        st.rerun() 
+                    else:
+                        st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
+                else:
+                    st.sidebar.warning("No se encontró ningún borrador para este correo.")
+        except Exception as e:
+            st.sidebar.error(f"Error al cargar: {e}")
+
+# ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
 # ==========================================
 equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
@@ -86,7 +188,7 @@ equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": 
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
 # ==========================================
 st.write("<br>", unsafe_allow_html=True)
-tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["SIMAJ", "Mantenimiento Externo"], horizontal=True)
+tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["SIMAJ", "Mantenimiento Externo"], horizontal=True, key="k_tipo")
 es_externo = (tipo_servicio == "Mantenimiento Externo")
 st.divider()
 
@@ -97,10 +199,10 @@ with col_logo:
 
 with col_menu:
     st.markdown("#### Selecciona el Equipo a Calibrar:")
-    gas_sel = st.radio("Selecciona el Equipo:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"], horizontal=True, label_visibility="collapsed")
+    gas_sel = st.radio("Selecciona el Equipo:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"], horizontal=True, label_visibility="collapsed", key="k_gas")
     pm_tipo = "N/A"
     if gas_sel in ["PM BAM", "PM Thermo"]:
-        pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True)
+        pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm")
 
 st.divider()
 datos_resumen = {}
@@ -244,7 +346,7 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
     col_izq, col_der = st.columns([1, 1.2])
     with col_izq:
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
-        estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones))
+        estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones, key="k_est"))
         
         fab_final = "ACOEM" if es_gas else ("Met One" if es_bam else "Thermo Fisher")
         mod_final = modelo_analizador
@@ -252,13 +354,13 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
         fab_capturado = kv(S_DAT, "Fabricante", st.text_input("Fabricante", value=fab_final, key="fab_analizador"))
-        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final))
+        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final, key="mod_analizador"))
         num_serie_val = equipos_act.get(estacion_sel, "")
-        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True))
-        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0))
+        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True, key="ns_analizador"))
+        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
         
-        falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"]))
-        if falla == "Sí 🔴": kv(S_DAT, "Descripción de falla", st.text_area("Descripción de Falla o Alarma"))
+        falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
+        if falla == "Sí 🔴": kv(S_DAT, "Descripción de falla", st.text_area("Descripción de Falla o Alarma", key="desc_falla"))
 
         datos_resumen["Estación"] = estacion_sel
         datos_resumen["Gas Calibrado"] = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
@@ -274,114 +376,19 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         col_ini, col_fin = st.columns(2)
         with col_ini:
             st.markdown("### Inicial")
-            fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today()), "Inicial")
-            kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None), "Inicial")
-            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=0.0), "Inicial")
-            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=0.0), "Inicial")
+            fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_ini"), "Inicial")
+            kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None, key="hora_ini"), "Inicial")
+            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=0.0, key="temp_ext_ini"), "Inicial")
+            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=0.0, key="temp_int_ini"), "Inicial")
             datos_resumen["Fecha de Servicio"] = str(fecha_ref)
             año_f, mes_f, dia_f = fecha_ref.strftime("%Y"), fecha_ref.strftime("%m"), fecha_ref.strftime("%d")
             
         with col_fin:
             st.markdown("### Final")
-            kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today()), "Final")
-            kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None), "Final")
-            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=0.0), "Final")
-            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=0.0), "Final")
-
-# ==========================================
-# PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
-# ==========================================
-st.sidebar.markdown("### 💾 Progreso en la Nube")
-st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
-correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", placeholder="tecnico@jalisco.gob.mx")
-
-col_btn1, col_btn2 = st.sidebar.columns(2)
-# Generar llave de vista actual única
-vista_actual = f"{tipo_servicio}_{estacion_sel}_{gas_sel}_{pm_tipo}"
-
-if col_btn1.button("📥 Guardar", use_container_width=True):
-    if not correo_borrador:
-        st.sidebar.error("Ingresa un correo.")
-    elif estacion_sel == "Selecciona una opción...":
-        st.sidebar.error("Selecciona una Estación primero.")
-    else:
-        try:
-            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-            if faltan: st.sidebar.error("Faltan credenciales de Google en Secrets.")
-            else:
-                with st.spinner("Guardando vista actual..."):
-                    servicio = build("drive", "v3", credentials=credenciales_google())
-                    carpeta = st.secrets["drive_carpeta_id"]
-                    nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                    
-                    res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                    archivos = res.get('files', [])
-                    
-                    dict_global = {}
-                    archivo_id = None
-                    if archivos:
-                        archivo_id = archivos[0]['id']
-                        req = servicio.files().get_media(fileId=archivo_id)
-                        contenido = req.execute()
-                        dict_global = json.loads(contenido.decode('utf-8'))
-                        
-                    datos_actuales = {}
-                    for k, v in st.session_state.items():
-                        if k.startswith('_') or k == "FormSubmitter": continue
-                        if isinstance(v, (str, int, float, bool, type(None))): datos_actuales[k] = v
-                        elif isinstance(v, (datetime.date, datetime.time)): datos_actuales[k] = str(v)
-                        
-                    dict_global[vista_actual] = datos_actuales
-                    
-                    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
-                    if archivo_id:
-                        servicio.files().update(fileId=archivo_id, media_body=media).execute()
-                    else:
-                        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
-                        
-                    st.sidebar.success(f"✅ Guardado: {gas_sel} en {estacion_sel}.")
-        except Exception as e:
-            st.sidebar.error(f"Error al guardar: {e}")
-
-if col_btn2.button("📤 Cargar", use_container_width=True):
-    if not correo_borrador:
-        st.sidebar.error("Ingresa un correo.")
-    elif estacion_sel == "Selecciona una opción...":
-        st.sidebar.error("Selecciona la Estación y Equipo a cargar.")
-    else:
-        try:
-            with st.spinner("Cargando..."):
-                servicio = build("drive", "v3", credentials=credenciales_google())
-                carpeta = st.secrets["drive_carpeta_id"]
-                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                
-                res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                archivos = res.get('files', [])
-                if archivos:
-                    req = servicio.files().get_media(fileId=archivos[0]['id'])
-                    contenido = req.execute()
-                    dict_global = json.loads(contenido.decode('utf-8'))
-                    
-                    if vista_actual in dict_global:
-                        datos_vista = dict_global[vista_actual]
-                        for k, v in datos_vista.items():
-                            if isinstance(v, str):
-                                if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
-                                    try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
-                                    except: pass
-                                elif re.match(r'^\d{2}:\d{2}:\d{2}$', v) or re.match(r'^\d{2}:\d{2}$', v):
-                                    try: v = datetime.datetime.strptime(v, '%H:%M:%S').time()
-                                    except:
-                                        try: v = datetime.datetime.strptime(v, '%H:%M').time()
-                                        except: pass
-                            st.session_state[k] = v
-                        st.rerun() 
-                    else:
-                        st.sidebar.warning(f"No hay datos guardados para {gas_sel} en {estacion_sel}.")
-                else:
-                    st.sidebar.warning("No se encontró ningún borrador para este correo.")
-        except Exception as e:
-            st.sidebar.error(f"Error al cargar: {e}")
+            kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_fin"), "Final")
+            kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None, key="hora_fin"), "Final")
+            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=0.0, key="temp_ext_fin"), "Final")
+            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=0.0, key="temp_int_fin"), "Final")
 
 # ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
@@ -398,7 +405,7 @@ if not es_externo:
         def fila_historico(nombre_mant, key_fecha, fecha_default, periodicidad_meses):
             c1, c2, c3, c4 = st.columns([2, 1.5, 1, 1.5])
             with c1: st.write(nombre_mant)
-            with c2: fecha_ult = st.date_input(f"Fecha {key_fecha}", value=fecha_default, max_value=datetime.date.today(), label_visibility="collapsed")
+            with c2: fecha_ult = st.date_input(f"Fecha {key_fecha}", value=fecha_default, max_value=datetime.date.today(), label_visibility="collapsed", key=f"hist_{key_fecha}")
             with c3: st.write(str(periodicidad_meses))
             with c4:
                 es_req = (fecha_ref - fecha_ult).days > (periodicidad_meses * 30)
@@ -523,11 +530,6 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Temperatura de flujo", "°C", "5 - 60", 5.0, 60.0, "th_tflujo"))
         procesar_resultado(*fila_regla("Temperatura de la tarjeta", "°C", "5 - 60", 5.0, 60.0, "th_ttarj"))
 
-    if len(resultados_pg) > 0:
-        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
-    else:
-        datos_resumen["Parámetros Generales"] = "Sin datos calculables"
-
 # ==========================================
 # 4. VERIFICACIÓN Y CALIBRACIÓN DE SENSORES Y FLUJO (PM)
 # ==========================================
@@ -603,14 +605,14 @@ if es_particulas:
             
             with col_der:
                 st.markdown("#### Presión Barométrica")
-                c1, c2, c3 = st.columns(3); c1.write("Lectura"); c_bar1 = c2.number_input("C_bar_l", label_visibility="collapsed", value=None); m_bar1 = c3.number_input("M_bar_l", label_visibility="collapsed", value=None)
+                c1, c2, c3 = st.columns(3); c1.write("Lectura"); c_bar1 = c2.number_input("C_bar_l", label_visibility="collapsed", value=None, key="C_bar_l"); m_bar1 = c3.number_input("M_bar_l", label_visibility="collapsed", value=None, key="M_bar_l")
                 if c_bar1 and m_bar1: st.write(f"Diferencia: {abs(m_bar1-c_bar1):.1f} mmHg (Ideal < 10)")
-                c1, c2, c3 = st.columns(3); c1.write("Calibración"); c_bar2 = c2.number_input("C_bar_c", label_visibility="collapsed", value=None); m_bar2 = c3.number_input("M_bar_c", label_visibility="collapsed", value=None)
+                c1, c2, c3 = st.columns(3); c1.write("Calibración"); c_bar2 = c2.number_input("C_bar_c", label_visibility="collapsed", value=None, key="C_bar_c"); m_bar2 = c3.number_input("M_bar_c", label_visibility="collapsed", value=None, key="M_bar_c")
                 if c_bar2 and m_bar2: st.write(f"Diferencia: {abs(m_bar2-c_bar2):.1f} mmHg (Ideal < 2)")
 
                 st.markdown("#### Flujo")
                 c1, c2, c3 = st.columns(3); c1.write("Calibrador"); c2.write("Monitor"); c3.write("% Desviación")
-                c1, c2, c3 = st.columns(3); f_cal = c1.number_input("f_cal", label_visibility="collapsed", value=None); f_mon = c2.number_input("f_mon", label_visibility="collapsed", value=None)
+                c1, c2, c3 = st.columns(3); f_cal = c1.number_input("f_cal", label_visibility="collapsed", value=None, key="f_cal"); f_mon = c2.number_input("f_mon", label_visibility="collapsed", value=None, key="f_mon")
                 with c3:
                     if f_cal and f_mon: st.write(f"{((f_mon-f_cal)/f_cal)*100:.2f}%")
                 st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm</small>", unsafe_allow_html=True)
@@ -739,7 +741,7 @@ if es_gas:
 if es_externo:
     with st.expander("📷 EVIDENCIAS FOTOGRÁFICAS (PROVEEDOR)", expanded=True):
         st.markdown("**Sube las fotografías que evidencian el mantenimiento (Se comprimirán para no saturar la memoria).**")
-        fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
+        fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key="fotos_prov")
         if fotos_subidas:
             columnas_fotos = st.columns(3)
             for i, foto in enumerate(fotos_subidas):
