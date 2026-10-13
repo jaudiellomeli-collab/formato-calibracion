@@ -73,76 +73,6 @@ def credenciales_google():
                        client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
 
 # ==========================================
-# PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
-# ==========================================
-st.sidebar.markdown("### 💾 Progreso en la Nube")
-st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar donde te quedaste.")
-correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", placeholder="tecnico@jalisco.gob.mx")
-
-col_btn1, col_btn2 = st.sidebar.columns(2)
-if col_btn1.button("📥 Guardar", use_container_width=True):
-    if not correo_borrador:
-        st.sidebar.error("Ingresa un correo.")
-    else:
-        try:
-            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-            if faltan: st.sidebar.error("Faltan credenciales de Google.")
-            else:
-                with st.spinner("Guardando..."):
-                    datos = {}
-                    for k, v in st.session_state.items():
-                        if k.startswith('_') or k == "FormSubmitter": continue
-                        if isinstance(v, (str, int, float, bool, type(None))): datos[k] = v
-                        elif isinstance(v, (datetime.date, datetime.time)): datos[k] = str(v)
-                    
-                    servicio = build("drive", "v3", credentials=credenciales_google())
-                    carpeta = st.secrets["drive_carpeta_id"]
-                    nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                    
-                    res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                    archivos = res.get('files', [])
-                    media = MediaIoBaseUpload(io.BytesIO(json.dumps(datos).encode('utf-8')), mimetype='application/json', resumable=True)
-                    if archivos: servicio.files().update(fileId=archivos[0]['id'], media_body=media).execute()
-                    else: servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
-                    st.sidebar.success("✅ Progreso guardado.")
-        except Exception as e:
-            st.sidebar.error("Error al guardar.")
-
-if col_btn2.button("📤 Cargar", use_container_width=True):
-    if not correo_borrador:
-        st.sidebar.error("Ingresa un correo.")
-    else:
-        try:
-            with st.spinner("Cargando..."):
-                servicio = build("drive", "v3", credentials=credenciales_google())
-                carpeta = st.secrets["drive_carpeta_id"]
-                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                
-                res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                archivos = res.get('files', [])
-                if archivos:
-                    req = servicio.files().get_media(fileId=archivos[0]['id'])
-                    contenido = req.execute()
-                    datos = json.loads(contenido.decode('utf-8'))
-                    
-                    for k, v in datos.items():
-                        if isinstance(v, str):
-                            if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
-                                try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
-                                except: pass
-                            elif re.match(r'^\d{2}:\d{2}:\d{2}$', v) or re.match(r'^\d{2}:\d{2}$', v):
-                                try: v = datetime.datetime.strptime(v, '%H:%M:%S').time()
-                                except:
-                                    try: v = datetime.datetime.strptime(v, '%H:%M').time()
-                                    except: pass
-                        st.session_state[k] = v
-                    st.rerun() 
-                else:
-                    st.sidebar.warning("No se encontró progreso.")
-        except Exception as e:
-            st.sidebar.error("Error al cargar.")
-
-# ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
 # ==========================================
 equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
@@ -359,6 +289,101 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=0.0), "Final")
 
 # ==========================================
+# PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
+# ==========================================
+st.sidebar.markdown("### 💾 Progreso en la Nube")
+st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
+correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", placeholder="tecnico@jalisco.gob.mx")
+
+col_btn1, col_btn2 = st.sidebar.columns(2)
+# Generar llave de vista actual única
+vista_actual = f"{tipo_servicio}_{estacion_sel}_{gas_sel}_{pm_tipo}"
+
+if col_btn1.button("📥 Guardar", use_container_width=True):
+    if not correo_borrador:
+        st.sidebar.error("Ingresa un correo.")
+    elif estacion_sel == "Selecciona una opción...":
+        st.sidebar.error("Selecciona una Estación primero.")
+    else:
+        try:
+            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
+            if faltan: st.sidebar.error("Faltan credenciales de Google en Secrets.")
+            else:
+                with st.spinner("Guardando vista actual..."):
+                    servicio = build("drive", "v3", credentials=credenciales_google())
+                    carpeta = st.secrets["drive_carpeta_id"]
+                    nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
+                    
+                    res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
+                    archivos = res.get('files', [])
+                    
+                    dict_global = {}
+                    archivo_id = None
+                    if archivos:
+                        archivo_id = archivos[0]['id']
+                        req = servicio.files().get_media(fileId=archivo_id)
+                        contenido = req.execute()
+                        dict_global = json.loads(contenido.decode('utf-8'))
+                        
+                    datos_actuales = {}
+                    for k, v in st.session_state.items():
+                        if k.startswith('_') or k == "FormSubmitter": continue
+                        if isinstance(v, (str, int, float, bool, type(None))): datos_actuales[k] = v
+                        elif isinstance(v, (datetime.date, datetime.time)): datos_actuales[k] = str(v)
+                        
+                    dict_global[vista_actual] = datos_actuales
+                    
+                    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
+                    if archivo_id:
+                        servicio.files().update(fileId=archivo_id, media_body=media).execute()
+                    else:
+                        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
+                        
+                    st.sidebar.success(f"✅ Guardado: {gas_sel} en {estacion_sel}.")
+        except Exception as e:
+            st.sidebar.error(f"Error al guardar: {e}")
+
+if col_btn2.button("📤 Cargar", use_container_width=True):
+    if not correo_borrador:
+        st.sidebar.error("Ingresa un correo.")
+    elif estacion_sel == "Selecciona una opción...":
+        st.sidebar.error("Selecciona la Estación y Equipo a cargar.")
+    else:
+        try:
+            with st.spinner("Cargando..."):
+                servicio = build("drive", "v3", credentials=credenciales_google())
+                carpeta = st.secrets["drive_carpeta_id"]
+                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
+                
+                res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
+                archivos = res.get('files', [])
+                if archivos:
+                    req = servicio.files().get_media(fileId=archivos[0]['id'])
+                    contenido = req.execute()
+                    dict_global = json.loads(contenido.decode('utf-8'))
+                    
+                    if vista_actual in dict_global:
+                        datos_vista = dict_global[vista_actual]
+                        for k, v in datos_vista.items():
+                            if isinstance(v, str):
+                                if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+                                    try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
+                                    except: pass
+                                elif re.match(r'^\d{2}:\d{2}:\d{2}$', v) or re.match(r'^\d{2}:\d{2}$', v):
+                                    try: v = datetime.datetime.strptime(v, '%H:%M:%S').time()
+                                    except:
+                                        try: v = datetime.datetime.strptime(v, '%H:%M').time()
+                                        except: pass
+                            st.session_state[k] = v
+                        st.rerun() 
+                    else:
+                        st.sidebar.warning(f"No hay datos guardados para {gas_sel} en {estacion_sel}.")
+                else:
+                    st.sidebar.warning("No se encontró ningún borrador para este correo.")
+        except Exception as e:
+            st.sidebar.error(f"Error al cargar: {e}")
+
+# ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
 # ==========================================
 req_basico = req_cs = req_comp = True
@@ -497,6 +522,11 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Presión de vacío de la muestra", "mmHg", "-5 a 250", -5.0, 250.0, "th_pvac"))
         procesar_resultado(*fila_regla("Temperatura de flujo", "°C", "5 - 60", 5.0, 60.0, "th_tflujo"))
         procesar_resultado(*fila_regla("Temperatura de la tarjeta", "°C", "5 - 60", 5.0, 60.0, "th_ttarj"))
+
+    if len(resultados_pg) > 0:
+        datos_resumen["Parámetros Generales"] = "Cumple" if all(resultados_pg) else "NO CUMPLE"
+    else:
+        datos_resumen["Parámetros Generales"] = "Sin datos calculables"
 
 # ==========================================
 # 4. VERIFICACIÓN Y CALIBRACIÓN DE SENSORES Y FLUJO (PM)
