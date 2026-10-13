@@ -264,7 +264,6 @@ S_PG = "Revisión de parámetros generales"
 S_SENS = "Verificación y calibración de sensores y flujo"
 S_MAS = "Calibración de masas (foils)"
 S_FLU = "Verificación y ajuste de flujo"
-S_FOT = "Evidencias fotográficas (proveedor)"
 S_LIM = "Limpieza, revisión y reemplazo"
 S_CAL = "Datos del calibrador de gases"
 S_CS = "Verificación cero-span"
@@ -272,7 +271,8 @@ S_MUL = "Calibración multipunto"
 S_DET = "Revisión detallada de componentes"
 S_RES = "Resumen y firmas finales"
 
-ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_FOT, S_LIM]
+# Se elimina S_FOT porque las fotos ahora se asocian directamente a las secciones
+ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_LIM]
 if es_externo: ORDEN_PDF.append(S_DET)
 ORDEN_PDF.extend([S_CAL, S_CS, S_MUL])
 if not es_externo: ORDEN_PDF.append(S_DET)
@@ -346,6 +346,26 @@ def fila_simple(nombre, key, ph="No se realizó"):
     with c2: obs = st.text_input("obs", key=key, label_visibility="collapsed", placeholder=ph)
     tabla_pdf(pdf_ctx["sec"], pdf_ctx["sub"], None, [nombre, Caja(obs, ph)], [1, 2], barra=True)
 
+def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc_default=""):
+    """Dibuja el uploader de imágenes e incrusta las fotos directamente en la sección del PDF."""
+    st.markdown(f"**{titulo}**")
+    fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=multiple, key=f"up_{key_prefix}")
+    if fotos_subidas:
+        lista_fotos = fotos_subidas if multiple else [fotos_subidas]
+        cols = st.columns(3)
+        for i, foto in enumerate(lista_fotos):
+            with cols[i % 3]:
+                img = Image.open(foto)
+                img.thumbnail((800, 800))
+                st.image(img, use_container_width=True)
+                desc_foto = st.text_input("Descripción:", value=desc_default if not multiple else "", key=f"desc_{key_prefix}_{i}", placeholder="Ej. Detalle...")
+                # Preparar para PDF
+                miniatura = img.convert("RGB")
+                miniatura.thumbnail((500, 500))
+                buf_foto = io.BytesIO()
+                miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
+                _sec(seccion_id)["fotos"].append((buf_foto.getvalue(), desc_foto))
+
 # ==========================================
 # 1. DATOS DEL ANALIZADOR
 # ==========================================
@@ -360,10 +380,16 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         if gas_sel == "Monóxido de Carbono (CO)" and estacion_sel == "Águilas": mod_final = "ML9830"
         elif gas_sel == "Dióxido de Azufre (SO2)" and estacion_sel in ["Pintas", "Centro", "Oblatos", "Tlaquepaque"]: fab_final = "ECOTECH"
             
-        fab_capturado = kv(S_DAT, "Fabricante", st.text_input("Fabricante", value=fab_final, key="fab_analizador"))
-        kv(S_DAT, "Modelo", st.text_input("Modelo", value=mod_final, key="mod_analizador"))
+        fab_capturado = st.text_input("Fabricante", value=fab_final)
+        kv(S_DAT, "Fabricante", fab_capturado)
+        
+        mod_capturado = st.text_input("Modelo", value=mod_final)
+        kv(S_DAT, "Modelo", mod_capturado)
+        
         num_serie_val = equipos_act.get(estacion_sel, "")
-        kv(S_DAT, "N/S (Automático)", st.text_input("N/S (Automático)", value=num_serie_val, disabled=True, key="ns_analizador"))
+        ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
+        kv(S_DAT, "N/S (Automático)", ns_capturado)
+        
         kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
@@ -659,6 +685,10 @@ if es_particulas:
             
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
+            
+        if es_externo:
+            st.divider()
+            renderizar_fotos_seccion(S_SENS, "📷 Evidencias de Sensores y Flujo", "fot_sens", multiple=True)
 
     with st.expander("⚖️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
         st.markdown("#### Ingreso de datos de Foils de Calibración")
@@ -692,6 +722,10 @@ if es_particulas:
         enc_masas = ["Lectura", "Foil Value Span (Ideal)", "Beta Average (Lectura del equipo)"]
         tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
         tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
+        
+        if es_externo:
+            st.divider()
+            renderizar_fotos_seccion(S_MAS, "📷 Evidencia de Calibración de Masas", "fot_mas", multiple=True)
 
 # ==========================================
 # 5. VERIFICACIÓN Y AJUSTE DE FLUJO (SÓLO GASES)
@@ -747,12 +781,9 @@ if es_gas:
                 
             pesos_flujo = [2, 1, 1.5, 1.5]
             tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
-            
             val_vol_pdf = f"{desv*100:.2f}%" if val else ""
             res_pdf = _res(resultado_cumple) if val else ""
-            
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
-                                            val_vol_pdf], pesos_flujo)
+            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val), val_vol_pdf], pesos_flujo)
             return val
 
         flujo_vol_verif = render_tabla_flujo_gases("Verificación", "verif")
@@ -762,51 +793,6 @@ if es_gas:
         
         if req_ajuste_final == "SÍ":
             render_tabla_flujo_gases("Ajuste", "ajus")
-
-# ==========================================
-# EVIDENCIAS FOTOGRÁFICAS (SÓLO MANTENIMIENTO EXTERNO)
-# ==========================================
-if es_externo:
-    with st.expander("📷 EVIDENCIAS FOTOGRÁFICAS (PROVEEDOR)", expanded=True):
-        st.markdown("**Sube las fotografías que evidencian el mantenimiento (Se comprimirán para no saturar la memoria).**")
-        fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key="fotos_prov")
-        if fotos_subidas:
-            columnas_fotos = st.columns(3)
-            for i, foto in enumerate(fotos_subidas):
-                with columnas_fotos[i % 3]:
-                    img = Image.open(foto)
-                    img.thumbnail((800, 800))
-                    st.image(img, use_container_width=True)
-                    desc_foto = st.text_input("Descripción:", key=f"desc_foto_{i}", placeholder="Ej. Filtro reemplazado...")
-                    miniatura = img.convert("RGB")
-                    miniatura.thumbnail((500, 500))
-                    buf_foto = io.BytesIO()
-                    miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-                    _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), desc_foto))
-                    
-        st.markdown("**Evidencia de Cero-Span:**")
-        foto_cs = st.file_uploader("Sube foto de Cero-Span", type=['png', 'jpg', 'jpeg'], key="foto_cs")
-        if foto_cs:
-            img = Image.open(foto_cs)
-            img.thumbnail((800, 800))
-            st.image(img, use_container_width=True)
-            miniatura = img.convert("RGB")
-            miniatura.thumbnail((500, 500))
-            buf_foto = io.BytesIO()
-            miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Evidencia de Cero-Span"))
-            
-        st.markdown("**Gráfica de Calibración (Multipunto):**")
-        foto_graf = st.file_uploader("Sube foto de la gráfica generada por Envidas", type=['png', 'jpg', 'jpeg'], key="foto_graf")
-        if foto_graf:
-            img = Image.open(foto_graf)
-            img.thumbnail((800, 800))
-            st.image(img, use_container_width=True)
-            miniatura = img.convert("RGB")
-            miniatura.thumbnail((500, 500))
-            buf_foto = io.BytesIO()
-            miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Gráfica de Calibración Multipunto (Envidas)"))
 
 # ==========================================
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
@@ -902,6 +888,10 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         fila_simple("Cinta de vidrio / filtro", "reemp_cinta")
         if es_bam: fila_simple("O-rings", "reemp_orings")
         fila_simple("Bomba de Vacío", "reemp_bomba")
+        
+    if es_externo:
+        st.divider()
+        renderizar_fotos_seccion(S_LIM, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if es_externo:
@@ -996,6 +986,10 @@ if es_gas:
         tabla_pdf(S_CS, "Concentración Span", ["Span Gen", "Resp Span", "% desv", "Resultado"],
                   [Caja(val_sg), Caja(resp_s), f"{desv_s * 100:.2f}%" if desv_s is not None else "",
                    _res(-0.03 <= desv_s <= 0.03 if desv_s is not None else None)])
+                   
+        if es_externo:
+            st.divider()
+            renderizar_fotos_seccion(S_CS, "📷 Evidencia de Cero-Span", "fot_cs", multiple=False, desc_default="Pantalla Cero-Span")
 
     with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=req_comp):
         col_pts, col_res = st.columns([1.5, 1])
@@ -1051,12 +1045,19 @@ if es_gas:
                                   height=400, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Guardar gráfica en memoria para el PDF
-                img_bytes = fig.to_image(format="png", width=800, height=400)
-                _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Calibración Multipunto"))
+                # Guardar gráfica en memoria para el PDF (Protegido por Try-Except para evitar el error de Kaleido)
+                try:
+                    img_bytes = fig.to_image(format="png", width=800, height=400)
+                    _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Regresión Lineal (Calculada)"))
+                except Exception as e:
+                    pass # Ocultamos el error de Kaleido si no está instalado
                 
             else:
                 st.info("Ingresa los datos para regresión.")
+                
+        if es_externo:
+            st.divider()
+            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if not es_externo:
