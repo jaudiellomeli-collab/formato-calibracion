@@ -246,7 +246,7 @@ tec_cal2_def = "" if es_externo else "Humberto Bustamante"
 
 tec_empresa_def = "" if es_externo else "Secretaría de Medio Ambiente y Desarrollo Territorial"
 tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
-sup_nombre_def = "" if es_externo else "Beatriz Rodríguez Pérez"
+sup_nombre_def = "" if es_externo else "Beatriz Rodriguez Perez"
 sup_empresa_def = "" if es_externo else "Desarrollo Territorial"
 
 # ==========================================
@@ -271,7 +271,6 @@ S_MUL = "Calibración multipunto"
 S_DET = "Revisión detallada de componentes"
 S_RES = "Resumen y firmas finales"
 
-# Se elimina S_FOT porque las fotos ahora se asocian directamente a las secciones
 ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_LIM]
 if es_externo: ORDEN_PDF.append(S_DET)
 ORDEN_PDF.extend([S_CAL, S_CS, S_MUL])
@@ -359,7 +358,6 @@ def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc
                 img.thumbnail((800, 800))
                 st.image(img, use_container_width=True)
                 desc_foto = st.text_input("Descripción:", value=desc_default if not multiple else "", key=f"desc_{key_prefix}_{i}", placeholder="Ej. Detalle...")
-                # Preparar para PDF
                 miniatura = img.convert("RGB")
                 miniatura.thumbnail((500, 500))
                 buf_foto = io.BytesIO()
@@ -670,10 +668,13 @@ if es_particulas:
             with c4: st.write("**Requirió Ajuste**")
             
             cal_targets = [15.0, 18.43, 16.67]
+            monitor_vals = []
             for idx, target in enumerate(cal_targets):
                 c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
                 with c1: st.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
-                with c2: st.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
+                with c2: 
+                    m_val = st.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
+                    if m_val is not None: monitor_vals.append(m_val)
                 with c3:
                     if idx == 0: st.text_area("Observaciones Generales", key=f"bam_f_obs_{pm_tipo}", height=90, label_visibility="collapsed")
                 with c4:
@@ -683,6 +684,18 @@ if es_particulas:
                            Caja(st.session_state.get(f"bam_f_obs_{pm_tipo}")) if idx == 0 else "", Caja(st.session_state.get(f"bam_f_cal_{pm_tipo}")) if idx == 0 else ""],
                           [1, 1, 2, 1])
             
+            c1, c2, c3 = st.columns([1, 1, 3])
+            with c1: st.write("**Promedio:**")
+            promedio_bam = sum(monitor_vals)/len(monitor_vals) if monitor_vals else None
+            with c2: 
+                if promedio_bam is not None: st.write(f"**{promedio_bam:.2f}**")
+            with c3:
+                if promedio_bam is not None:
+                    cumple_bam = 16.00 <= promedio_bam <= 17.34
+                    if cumple_bam: st.success("Cumple ✅")
+                    else: st.error("NO CUMPLE ❌")
+                    tabla_pdf(S_SENS, "", None, ["Promedio", f"{promedio_bam:.2f}", _res(cumple_bam), ""], [1, 1, 2, 1])
+                    
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
             
@@ -781,9 +794,12 @@ if es_gas:
                 
             pesos_flujo = [2, 1, 1.5, 1.5]
             tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
+            
             val_vol_pdf = f"{desv*100:.2f}%" if val else ""
             res_pdf = _res(resultado_cumple) if val else ""
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val), val_vol_pdf], pesos_flujo)
+            
+            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
+                                            val_vol_pdf], pesos_flujo)
             return val
 
         flujo_vol_verif = render_tabla_flujo_gases("Verificación", "verif")
@@ -798,6 +814,7 @@ if es_gas:
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
 # ==========================================
 def bloque_revision_detallada():
+    """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
@@ -1092,7 +1109,7 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
     with c3:
         st.markdown("<div class='header-firma'>Supervisor SEMADET</div>", unsafe_allow_html=True)
         st.text_input("Cargo", value="Coordinadora de SIMAJ", key="c_sema")
-        st.text_input("Nombre", value="Bety", key="n_sema", placeholder="Nombre del supervisor...")
+        st.text_input("Nombre", value="Beatriz Rodriguez Perez", key="n_sema", placeholder="Nombre del supervisor...")
         st.date_input("Fecha", datetime.date.today(), key="f_sema")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
 
