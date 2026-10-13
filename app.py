@@ -249,7 +249,6 @@ tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
 sup_nombre_def = "" if es_externo else "Beatriz Rodríguez Pérez"
 sup_empresa_def = "" if es_externo else "Desarrollo Territorial"
 
-
 # ==========================================
 # ENCABEZADO
 # ==========================================
@@ -296,6 +295,7 @@ def nota_pdf(seccion, texto):
     _sec(seccion)["notas"].append(texto)
 
 def _res(ok):
+    if ok is None: return ""
     return Alerta({True: "Cumple", False: "NO CUMPLE"}.get(ok, ""), ok)
 
 ENC_PG = ["Parámetro", "Unidades", "Ideal", "Inicial", "Comentarios", "Final", "Comentarios"]
@@ -731,16 +731,25 @@ if es_gas:
             with c1: st.write("Flujo Volumétrico (cc/min)")
             with c2: st.write(str(flujo_ideal_vol))
             with c3: val = st.number_input("val_vol", key=f"{key_prefix}_vol", label_visibility="collapsed")
+            
+            resultado_cumple = None
+            if val is not None:
+                desv = ((val - flujo_ideal_vol) / flujo_ideal_vol)
+                resultado_cumple = abs(desv) <= flujo_tol
+                
             with c4: 
-                if val: st.write(f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%")
+                if val: st.write(f"{desv*100:.2f}%")
+            with c5:
+                if resultado_cumple is not None:
+                    if resultado_cumple: st.success("Cumple ✅")
+                    else: st.error("NO CUMPLE ❌")
+                else: st.write("-")
+                
             pesos_flujo = [2, 1, 1.5, 1.5]
-            
-            c_est = st.session_state.get(f"{key_prefix}_est")
-            
             tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
             
-            val_vol_pdf = f"{((val-flujo_ideal_vol)/flujo_ideal_vol)*100:.2f}%" if val else ""
-            res_pdf = _res(abs(val - flujo_ideal_vol)/flujo_ideal_vol <= flujo_tol) if val else ""
+            val_vol_pdf = f"{desv*100:.2f}%" if val else ""
+            res_pdf = _res(resultado_cumple) if val else ""
             
             tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
                                             val_vol_pdf], pesos_flujo)
@@ -788,7 +797,7 @@ if es_externo:
             _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Evidencia de Cero-Span"))
             
         st.markdown("**Gráfica de Calibración (Multipunto):**")
-        foto_graf = st.file_uploader("Sube foto de la gráfica generada", type=['png', 'jpg', 'jpeg'], key="foto_graf")
+        foto_graf = st.file_uploader("Sube foto de la gráfica generada por Envidas", type=['png', 'jpg', 'jpeg'], key="foto_graf")
         if foto_graf:
             img = Image.open(foto_graf)
             img.thumbnail((800, 800))
@@ -797,13 +806,12 @@ if es_externo:
             miniatura.thumbnail((500, 500))
             buf_foto = io.BytesIO()
             miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Gráfica de Calibración Multipunto"))
+            _sec(S_FOT)["fotos"].append((buf_foto.getvalue(), "Gráfica de Calibración Multipunto (Envidas)"))
 
 # ==========================================
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
 # ==========================================
 def bloque_revision_detallada():
-    """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
@@ -827,7 +835,7 @@ def bloque_revision_detallada():
                 fila_comp("Filtro óptico", "d_fopt")
                 fila_comp("Tarjetas electrónicas", "d_tarj")
                 fila_comp("Fuente de voltaje", "d_fvolt")
-            else: # NOx y SO2
+            else: 
                 fila_comp("Bomba de Vacío externa", "d_bomba_gn")
                 fila_comp("Generador de Ozono", "d_gen_gn")
                 fila_comp("Permapure", "d_perm_gn")
@@ -995,8 +1003,8 @@ if es_gas:
             x_vals, y_vals, desviaciones = [], [], []
             for i, cal_val in enumerate(puntos_multipunto):
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}", label_visibility="collapsed")
-                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}", format="%.4f", label_visibility="collapsed")
+                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
+                with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}_{gas_sel}", format="%.4f", label_visibility="collapsed")
                 with c3:
                     if ana_val is not None:
                         dif = ana_val - cal_val
@@ -1013,7 +1021,8 @@ if es_gas:
         if len(x_vals) > 1:
             try:
                 m, b = np.polyfit(np.array(x_vals), np.array(y_vals), 1)
-                r2 = (np.corrcoef(x_vals, y_vals)[0,1])**2
+                r_matrix = np.corrcoef(x_vals, y_vals)
+                r2 = r_matrix[0,1]**2
                 if desviaciones: promedio = sum(desviaciones) / len(desviaciones)
             except: pass
 
@@ -1031,6 +1040,21 @@ if es_gas:
                 tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
                 if aprobado: st.success("✅ MULTIPUNTO APROBADO")
                 else: st.error("❌ MULTIPUNTO RECHAZADO")
+                
+                # Generación de la gráfica
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='markers', name='Datos', marker=dict(color='#00B2A9', size=10)))
+                x_line = np.linspace(min(x_vals), max(x_vals), 100)
+                y_line = m * x_line + b
+                fig.add_trace(go.Scatter(x=x_line, y=y_line, mode='lines', name='Ajuste Lineal', line=dict(color='#F37021')))
+                fig.update_layout(title="Regresión Lineal: Calibrador vs Analizador", xaxis_title="Calibrador", yaxis_title="Analizador", 
+                                  height=400, margin=dict(l=20, r=20, t=40, b=20))
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Guardar gráfica en memoria para el PDF
+                img_bytes = fig.to_image(format="png", width=800, height=400)
+                _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Calibración Multipunto"))
+                
             else:
                 st.info("Ingresa los datos para regresión.")
 
