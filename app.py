@@ -1072,9 +1072,21 @@ if es_gas:
                 for etiqueta, valor in [("Pendiente (m)", f"{m:.5f}"), ("Intercepto (b)", f"{b:.5f}"), ("R2", f"{r2:.6f}")]:
                     tabla_pdf(S_MUL, "Regresión", None, [etiqueta, Caja(valor)], [1, 1])
                 tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
-                
                 if aprobado: st.success("✅ MULTIPUNTO APROBADO")
                 else: st.error("❌ MULTIPUNTO RECHAZADO")
+                
+                st.markdown("""
+                <div style='background-color:#f0f2f6; padding:10px; border-radius:5px; border:1px solid #ccc;'>
+                    <b>Análisis de resultados y criterios de aceptación</b><br>
+                    <small>
+                    La calibración será aceptada sí: <i>(Depende de la marca y modelo de equipo estos criterios)</i><br>
+                    • El gradiente (m) se encuentra entre los valores de 0.98 y 1.02<br>
+                    • La intercepción (b) esté entre - 2 a + 2<br>
+                    • La correlación (R²) es mayor que 0.99.<br><br>
+                    <b>Rechazar la calibración si el criterio de arriba no se obtiene. La calibración puede fallar por fugas o por el depurador.</b>
+                    </small>
+                </div>
+                """, unsafe_allow_html=True)
                 
                 # Generación de la gráfica
                 fig = go.Figure()
@@ -1131,7 +1143,7 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
 
     with c3:
         st.markdown("<div class='header-firma'>Supervisor SEMADET</div>", unsafe_allow_html=True)
-        st.text_input("Cargo", value="Coordinadora de SIMAJ", key="c_sema")
+        st.text_input("Cargo", value="Coordinador Especializado", key="c_sema")
         st.text_input("Nombre", value="Beatriz Rodriguez Perez", key="n_sema", placeholder="Nombre del supervisor...")
         st.date_input("Fecha", datetime.date.today(), key="f_sema")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
