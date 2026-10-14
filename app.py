@@ -1218,34 +1218,37 @@ def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
     servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
 
 with col_drive:
-    if st.button("☁️ Respaldar Reporte COMPLETO en Drive", use_container_width=True):
-        try: faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-        except Exception: faltan = SECRETS_REQUERIDOS
-            
+    if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True):
+        try:
+            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
+        except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
+            faltan = SECRETS_REQUERIDOS
         if sin_estacion:
             mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
+        elif faltan:
+            mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
         else:
-            with st.spinner("Empaquetando el 100% de los datos y subiendo a Google Drive..."):
+            pdf_bytes, nombre_del_pdf = generar_pdf(), nombre_pdf()
+            enlace = ""
+            with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
                 try:
-                    servicio_drive = build('drive', 'v3', credentials=credenciales_google())
-                    CARPETA_ID = st.secrets["drive_carpeta_id"]
-                    nombre_archivo_excel = f"{nombre_base_archivo()}.xlsx"
-                    
-                    estado_completo = []
-                    for key, value in st.session_state.items():
-                        if not key.startswith('_'):
-                            estado_completo.append({"Campo (ID)": key, "Valor Capturado": str(value)})
-                    df_estado = pd.DataFrame(estado_completo)
-                    
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                        df_estado.to_excel(writer, sheet_name="Datos_Capturados", index=False)
-                        
-                    excel_buffer.seek(0)
-                    media = MediaIoBaseUpload(excel_buffer, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', resumable=True)
-                    archivo_subido = servicio_drive.files().create(body={'name': nombre_archivo_excel, 'parents': [CARPETA_ID]}, media_body=media, fields='id').execute()
-                    
-                    st.success(f"✅ ¡Reporte guardado en Drive como: {nombre_archivo_excel}!")
-                    
+                    servicio_drive = build("drive", "v3", credentials=credenciales_google())
+                    pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", st.secrets["drive_carpeta_id"])
+                    enlace = pdf_subido.get("webViewLink", "")
+                    st.success(f"✅ PDF guardado en Drive como: {nombre_del_pdf}")
                 except Exception as e:
-                    st.error(f"❌ Error de conexión con Google Drive: Revise sus credenciales y Secrets.")
+                    st.error(f"❌ No se pudo guardar en Drive: {type(e).__name__}: {e}")
+            with mensajes, st.spinner("Enviando el PDF al coordinador..."):
+                try:
+                    servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
+                    gas_txt = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
+                    cuerpo = (f"Buen día,\n\nSe adjunta el formato de calibración de {gas_txt} de la estación {estacion_sel}, "
+                              f"con fecha de servicio {fecha_ref}.\n"
+                              + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
+                              + "\nSaludos.")
+                    enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
+                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref}", cuerpo,
+                                  [(nombre_del_pdf, pdf_bytes, "application/pdf")])
+                    st.success("✅ Correo enviado al coordinador.")
+                except Exception as e:
+                    st.error(f"❌ No se pudo enviar el correo: {type(e).__name__}: {e}")
