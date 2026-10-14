@@ -590,74 +590,66 @@ if es_particulas:
         st.divider()
 
         if es_thermo:
-            def sensor_3p(titulo, limite_dif, val_ideal_desc):
-                st.markdown(f"#### {titulo}")
-                c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-                with c1: st.write("**Calibrador**")
-                with c2: st.write("**Monitor**")
-                with c3: st.write("**Diferencia**")
-                
-                cal_v, mon_v = [], []
-                for i in range(1, 4):
-                    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-                    with c1: c_val = st.number_input(f"c{i}", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
-                    with c2: m_val = st.number_input(f"m{i}", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
-                    with c3:
-                        if c_val is not None and m_val is not None: st.write(f"{(m_val - c_val):.2f}")
-                        else: st.write("-")
-                    tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Caja(c_val), Caja(m_val), f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-", ""],
-                              [1, 1, 1, 2])
-                    if c_val is not None: cal_v.append(c_val)
-                    if m_val is not None: mon_v.append(m_val)
-                
-                c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-                with c1:
-                    prom_c = sum(cal_v)/len(cal_v) if cal_v else None
-                    st.write(f"**{prom_c:.2f}**" if prom_c else "Promedio")
-                with c2:
-                    prom_m = sum(mon_v)/len(mon_v) if mon_v else None
-                    st.write(f"**{prom_m:.2f}**" if prom_m else "Promedio")
-                with c3:
-                    if prom_c and prom_m:
-                        dif_prom = prom_m - prom_c
-                        if abs(dif_prom) <= limite_dif: st.success(f"{dif_prom:.2f}")
-                        else: st.error(f"{dif_prom:.2f}")
-                    else: st.write("-")
-                with c4:
-                    obs_sensor = st.text_input("Comentarios", key=f"{titulo}_obs", placeholder="Comentarios...", label_visibility="collapsed")
-                    dif_pdf = Alerta(f"{prom_m - prom_c:.2f}", abs(prom_m - prom_c) <= limite_dif) if prom_c and prom_m else "-"
-                    tabla_pdf(S_SENS, titulo, ["Calibrador", "Monitor", "Diferencia", "Comentarios"],
-                              [Neg(f"{prom_c:.2f}" if prom_c else "Promedio"), Neg(f"{prom_m:.2f}" if prom_m else "Promedio"), dif_pdf,
-                               Caja(obs_sensor, "Comentarios...")], [1, 1, 1, 2])
-                    nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
-                    st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
+            st.markdown("#### Presión Barométrica")
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
+            c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Comentarios**")
             
-            col_izq, col_der = st.columns(2)
-            with col_izq:
-                sensor_3p("Temperatura Ambiente", 2.0, "La diferencia debe ser menor a ± 2 °C")
-                sensor_3p("Humedad Relativa", 2.0, "La diferencia debe ser menor a ± 2 %")
-                sensor_3p("Temperatura de flujo", 2.0, "La diferencia debe ser menor a ± 2 °C")
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
+            c1.write("Lectura")
+            c_bar1 = c2.number_input("C_bar_l", label_visibility="collapsed", value=None, key="C_bar_l")
+            m_bar1 = c3.number_input("M_bar_l", label_visibility="collapsed", value=None, key="M_bar_l")
+            obs_bar1 = c4.text_input("obs_bar_l", label_visibility="collapsed", key="obs_bar1", placeholder="Comentarios...")
+            if c_bar1 and m_bar1: st.write(f"<small>Diferencia: {abs(m_bar1-c_bar1):.1f} mmHg (Debe ser menor a ± 10 mmHg)</small>", unsafe_allow_html=True)
             
-            with col_der:
-                st.markdown("#### Presión Barométrica")
-                c1, c2, c3 = st.columns(3); c1.write("Lectura"); c_bar1 = c2.number_input("C_bar_l", label_visibility="collapsed", value=None, key="C_bar_l"); m_bar1 = c3.number_input("M_bar_l", label_visibility="collapsed", value=None, key="M_bar_l")
-                if c_bar1 and m_bar1: st.write(f"Diferencia: {abs(m_bar1-c_bar1):.1f} mmHg (Ideal < 10)")
-                c1, c2, c3 = st.columns(3); c1.write("Calibración"); c_bar2 = c2.number_input("C_bar_c", label_visibility="collapsed", value=None, key="C_bar_c"); m_bar2 = c3.number_input("M_bar_c", label_visibility="collapsed", value=None, key="M_bar_c")
-                if c_bar2 and m_bar2: st.write(f"Diferencia: {abs(m_bar2-c_bar2):.1f} mmHg (Ideal < 2)")
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
+            c1.write("Calibración")
+            c_bar2 = c2.number_input("C_bar_c", label_visibility="collapsed", value=None, key="C_bar_c")
+            m_bar2 = c3.number_input("M_bar_c", label_visibility="collapsed", value=None, key="M_bar_c")
+            obs_bar2 = c4.text_input("obs_bar_c", label_visibility="collapsed", key="obs_bar2", placeholder="Comentarios...")
+            if c_bar2 and m_bar2: st.write(f"<small>Diferencia: {abs(m_bar2-c_bar2):.1f} mmHg (Debe ser menor a ± 2 mmHg)</small>", unsafe_allow_html=True)
 
-                st.markdown("#### Flujo")
-                c1, c2, c3 = st.columns(3); c1.write("Calibrador"); c2.write("Monitor"); c3.write("% Desviación")
-                c1, c2, c3 = st.columns(3); f_cal = c1.number_input("f_cal", label_visibility="collapsed", value=None, key="f_cal"); f_mon = c2.number_input("f_mon", label_visibility="collapsed", value=None, key="f_mon")
-                with c3:
-                    if f_cal and f_mon: st.write(f"{((f_mon-f_cal)/f_cal)*100:.2f}%")
-                st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm</small>", unsafe_allow_html=True)
-                enc_baro = ["Medición", "Calibrador", "Monitor"]
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Lectura", Caja(c_bar1), Caja(m_bar1)])
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Calibración", Caja(c_bar2), Caja(m_bar2)])
-                tabla_pdf(S_SENS, "Flujo", ["Calibrador", "Monitor", "% Desviación"],
-                          [Caja(f_cal), Caja(f_mon), f"{((f_mon-f_cal)/f_cal)*100:.2f}%" if f_cal and f_mon else ""])
-                nota_pdf(S_SENS, "Flujo: el valor promedio debe estar entre 16.00 y 17.34 Lpm")
+            enc_baro = ["", "Calibrador", "Monitor", "Comentarios"]
+            tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Lectura", Caja(c_bar1), Caja(m_bar1), Caja(obs_bar1)])
+            tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Calibración", Caja(c_bar2), Caja(m_bar2), Caja(obs_bar2)])
+
+            st.markdown("#### Presión de Flujo de span (mmHg)")
+            c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1.5])
+            c1.write(""); c2.write("**Manómetro Certificado**"); c3.write("**Monitor Inicial**"); c4.write("**Monitor Final**"); c5.write("**Comentarios**")
+            
+            c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1.5])
+            c1.write("Lectura")
+            man_dif = c2.number_input("man_dif", label_visibility="collapsed", value=None, key="pfs_man")
+            mon_ini = c3.number_input("mon_ini", label_visibility="collapsed", value=None, key="pfs_mini")
+            mon_fin = c4.number_input("mon_fin", label_visibility="collapsed", value=None, key="pfs_mfin")
+            obs_pfs = c5.text_input("obs_pfs", label_visibility="collapsed", key="obs_pfs", placeholder="Comentarios...")
+            
+            enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final", "Comentarios"]
+            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin), Caja(obs_pfs)])
+
+            def render_flujo_thermo(titulo, key_prefix):
+                st.markdown(f"#### {titulo} (Lpm)")
+                c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1.5])
+                c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**% Desviación**"); c5.write("**Comentarios**")
+
+                c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1.5])
+                c1.write("Lectura")
+                f_cal = c2.number_input("f_cal", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
+                f_mon = c3.number_input("f_mon", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
+                obs_flujo = c5.text_input("obs_flujo", label_visibility="collapsed", key=f"{key_prefix}_obs", placeholder="Comentarios...")
+                
+                desv_str = ""
+                if f_cal and f_mon:
+                    desv = ((f_mon - f_cal) / f_cal) * 100
+                    desv_str = f"{desv:.2f}%"
+                    c4.write(f"**{desv_str}**")
+                    
+                st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.</small>", unsafe_allow_html=True)
+                
+                enc_flujo = ["", "Calibrador", "Monitor", "% Desviación", "Comentarios"]
+                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, Caja(obs_flujo)])
+
+            render_flujo_thermo("Flujo Automático", "fauto")
+            render_flujo_thermo("Flujo Manual", "fman")
 
         elif es_bam:
             st.markdown("#### Flujo en Litros por Minuto")
@@ -821,7 +813,6 @@ def bloque_revision_detallada():
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         
-        # Mover el bloque de fotos al inicio si es externo
         if es_externo:
             renderizar_fotos_seccion(S_DET, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
@@ -1044,14 +1035,12 @@ if es_gas:
 
         with col_res:
             if m is not None:
-                # Límites oficiales
                 lim_b = 2.0 if gas_sel == "Monóxido de Carbono (CO)" else 0.02
                 
                 cond_m = 0.98 <= m <= 1.02
                 cond_b = -lim_b <= b <= lim_b
                 cond_r2 = r2 > 0.99
                 
-                # Despliegue con indicadores visuales individuales
                 st.write("**Pendiente (m)**")
                 c1, c2 = st.columns([1, 4])
                 with c1: st.write("✅" if cond_m else "❌")
@@ -1074,38 +1063,44 @@ if es_gas:
                 tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
                 if aprobado: st.success("✅ MULTIPUNTO APROBADO")
                 else: st.error("❌ MULTIPUNTO RECHAZADO")
-                
+
+            else:
+                st.info("Ingresa los datos para regresión.")
+
+        if m is not None:
+            st.divider()
+            col_graf, col_ley = st.columns([1.5, 1], gap="medium")
+            
+            with col_ley:
+                st.write("<br>", unsafe_allow_html=True)
                 st.markdown("""
-                <div style='background-color:#f0f2f6; padding:10px; border-radius:5px; border:1px solid #ccc;'>
-                    <b>Análisis de resultados y criterios de aceptación</b><br>
-                    <small>
-                    La calibración será aceptada sí: <i>(Depende de la marca y modelo de equipo estos criterios)</i><br>
+                <div style='background-color:#f0f2f6; padding:15px; border-radius:5px; border:1px solid #ccc;'>
+                    <b style='font-size: 16px;'>Análisis de resultados y criterios de aceptación</b><br>
+                    <span style='font-size: 14px;'>
+                    <br>La calibración será aceptada sí: <i>(Depende de la marca y modelo de equipo estos criterios)</i><br><br>
                     • El gradiente (m) se encuentra entre los valores de 0.98 y 1.02<br>
                     • La intercepción (b) esté entre - 2 a + 2<br>
                     • La correlación (R²) es mayor que 0.99.<br><br>
                     <b>Rechazar la calibración si el criterio de arriba no se obtiene. La calibración puede fallar por fugas o por el depurador.</b>
-                    </small>
+                    </span>
                 </div>
                 """, unsafe_allow_html=True)
-                
-                # Generación de la gráfica
+
+            with col_graf:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='markers', name='Datos', marker=dict(color='#00B2A9', size=10)))
                 x_line = np.linspace(min(x_vals), max(x_vals), 100)
                 y_line = m * x_line + b
                 fig.add_trace(go.Scatter(x=x_line, y=y_line, mode='lines', name='Ajuste Lineal', line=dict(color='#F37021')))
                 fig.update_layout(title="Regresión Lineal: Calibrador vs Analizador", xaxis_title="Calibrador", yaxis_title="Analizador", 
-                                  height=400, margin=dict(l=20, r=20, t=40, b=20))
+                                  height=350, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
-                
-                try:
-                    img_bytes = fig.to_image(format="png", width=800, height=400)
-                    _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Regresión Lineal (Calculada)"))
-                except Exception as e:
-                    pass 
-                
-            else:
-                st.info("Ingresa los datos para regresión.")
+
+            try:
+                img_bytes = fig.to_image(format="png", width=800, height=400)
+                _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Regresión Lineal (Calculada)"))
+            except Exception as e:
+                pass 
                 
         if es_externo:
             st.divider()
