@@ -218,17 +218,17 @@ flujo_ideal_vol = 0
 
 if gas_sel == "Ozono (O3)": 
     equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
-    flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
+    flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Óxidos de Nitrógeno (NOx)": 
     equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
-    flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.001]; span_gen_default = 0.400
+    flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Monóxido de Carbono (CO)": 
     equipos_act = equipos_co; modelo_analizador = "Serinus 30"
-    flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.001]; span_gen_default = 40.0
+    flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.0]; span_gen_default = 40.0
 elif gas_sel == "Dióxido de Azufre (SO2)": 
     equipos_act = equipos_so2; modelo_analizador = "Serinus 50"
     flujo_ideal_vol = 700; 
-    flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0001]; span_gen_default = 0.400
+    flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif es_bam or es_thermo:
     equipos_act = equipos_pm10 if pm_tipo == "PM10" else equipos_pm25
     modelo_analizador = "BAM 1020" if es_bam else "5014i"
@@ -580,11 +580,11 @@ if es_particulas:
         with col_c2:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value="Comexsa" if not es_externo else "", key="pm_cal_lab")
-            st.date_input("Fecha de calibración", datetime.date(2026, 1, 20), key="pm_cal_fecha")
+            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 1, 20), key="pm_cal_fecha")
             st.text_input("No de certificado", value="E252677468" if not es_externo else "", key="pm_cal_cert")
         for etiqueta, k, grupo in [("Marca", "pm_cal_mca", "Calibrador (Sensores y Flujo)"), ("Modelo", "pm_cal_mod", "Calibrador (Sensores y Flujo)"),
                                    ("N/S", "pm_cal_ns", "Calibrador (Sensores y Flujo)"), ("Laboratorio", "pm_cal_lab", "Certificación"),
-                                   ("Fecha de calibración", "pm_cal_fecha", "Certificación"), ("No de certificado", "pm_cal_cert", "Certificación")]:
+                                   ("Fecha de calibración/certificado", "pm_cal_fecha", "Certificación"), ("No de certificado", "pm_cal_cert", "Certificación")]:
             kv(S_SENS, etiqueta, st.session_state.get(k), grupo)
 
         st.divider()
@@ -756,12 +756,12 @@ if es_gas:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value=lab_cal1_def, key="lab_cal1")
             st.text_input("Técnico", value=tec_cal1_def, key="tec_cal1")
-            st.date_input("Vigente hasta", datetime.date(2026, 6, 20), key="vig_cal1")
+            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 6, 20), key="vig_cal1")
             st.text_input("No de certificado", value=cert_cal1_def, key="cert_cal1")
 
         for etiqueta, k, grupo in [("Fabricante", "fab_cal1", "Calibrador de Flujo"), ("Modelo", "mod_cal1", "Calibrador de Flujo"),
                                    ("N/S Calibrador de Flujo", "ns_cal1", "Calibrador de Flujo"), ("Laboratorio", "lab_cal1", "Certificación"),
-                                   ("Técnico", "tec_cal1", "Certificación"), ("Vigente hasta", "vig_cal1", "Certificación"),
+                                   ("Técnico", "tec_cal1", "Certificación"), ("Fecha de calibración/certificado", "vig_cal1", "Certificación"),
                                    ("No de certificado", "cert_cal1", "Certificación")]:
             kv(S_FLU, etiqueta, st.session_state.get(k), grupo)
 
@@ -793,6 +793,9 @@ if es_gas:
                 else: st.write("-")
                 
             pesos_flujo = [2, 1, 1.5, 1.5]
+            
+            c_est = st.session_state.get(f"{key_prefix}_est")
+            
             tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
             
             val_vol_pdf = f"{desv*100:.2f}%" if val else ""
@@ -817,6 +820,12 @@ def bloque_revision_detallada():
     """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
+        
+        # Mover el bloque de fotos al inicio si es externo
+        if es_externo:
+            renderizar_fotos_seccion(S_DET, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
+            st.divider()
+            
         c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
         with c1: st.write("**Componente**")
         with c2: st.write("**Estado**")
@@ -905,10 +914,6 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         fila_simple("Cinta de vidrio / filtro", "reemp_cinta")
         if es_bam: fila_simple("O-rings", "reemp_orings")
         fila_simple("Bomba de Vacío", "reemp_bomba")
-        
-    if es_externo:
-        st.divider()
-        renderizar_fotos_seccion(S_LIM, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if es_externo:
@@ -928,10 +933,10 @@ if es_gas:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value=lab_cal2_def, key="lab_calib2")
             st.text_input("Técnico", value=tec_cal2_def, key="tec_calib2")
-            st.date_input("Vigente hasta", datetime.date(2026, 8, 8), key="vig_calib2")
+            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 8, 8), key="vig_calib2")
         for etiqueta, k, grupo in [("Fabricante", "fab_calib2", ""), ("Modelo", "mod_calib2", ""), ("N/S Calibrador de Gases", "ns_calib2", ""),
                                    ("Laboratorio", "lab_calib2", "Certificación"), ("Técnico", "tec_calib2", "Certificación"),
-                                   ("Vigente hasta", "vig_calib2", "Certificación")]:
+                                   ("Fecha de calibración/certificado", "vig_calib2", "Certificación")]:
             kv(S_CAL, etiqueta, st.session_state.get(k), grupo)
 
     with st.expander("⚖️ VERIFICACIÓN CERO-SPAN", expanded=req_cs):
@@ -976,7 +981,7 @@ if es_gas:
         with col_cs_cero:
             st.markdown("#### Concentración Cero")
             c1, c2, c3 = st.columns(3)
-            val_cg_ideal = 0.001 if gas_sel != "Dióxido de Azufre (SO2)" else 0.0001
+            val_cg_ideal = 0.0
             with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True, key="vcg")
             with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
             with c3:
@@ -1062,19 +1067,18 @@ if es_gas:
                                   height=400, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Guardar gráfica en memoria para el PDF (Protegido por Try-Except para evitar el error de Kaleido)
                 try:
                     img_bytes = fig.to_image(format="png", width=800, height=400)
                     _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Regresión Lineal (Calculada)"))
                 except Exception as e:
-                    pass # Ocultamos el error de Kaleido si no está instalado
+                    pass 
                 
             else:
                 st.info("Ingresa los datos para regresión.")
                 
         if es_externo:
             st.divider()
-            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
+            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if not es_externo:
