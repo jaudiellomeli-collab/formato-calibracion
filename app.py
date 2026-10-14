@@ -1044,16 +1044,35 @@ if es_gas:
 
         with col_res:
             if m is not None:
-                st.metric("Pendiente (m)", f"{m:.5f}")
-                st.metric("Intercepto (b)", f"{b:.5f}")
-                st.metric("R²", f"{r2:.6f}")
-                cond_m = 0.95 <= m <= 1.05
-                cond_b = -3.0 <= b <= 3.0
-                cond_prom = -0.03 <= promedio <= 0.03 if promedio else False
-                aprobado = cond_m and cond_b and cond_prom
+                # Límites oficiales
+                lim_b = 2.0 if gas_sel == "Monóxido de Carbono (CO)" else 0.02
+                
+                cond_m = 0.98 <= m <= 1.02
+                cond_b = -lim_b <= b <= lim_b
+                cond_r2 = r2 > 0.99
+                
+                # Despliegue con indicadores visuales individuales
+                st.write("**Pendiente (m)**")
+                c1, c2 = st.columns([1, 4])
+                with c1: st.write("✅" if cond_m else "❌")
+                with c2: st.markdown(f"#### {m:.5f}")
+                
+                st.write("**Intercepto (b)**")
+                c1, c2 = st.columns([1, 4])
+                with c1: st.write("✅" if cond_b else "❌")
+                with c2: st.markdown(f"#### {b:.5f}")
+                
+                st.write("**R²**")
+                c1, c2 = st.columns([1, 4])
+                with c1: st.write("✅" if cond_r2 else "❌")
+                with c2: st.markdown(f"#### {r2:.6f}")
+                
+                aprobado = cond_m and cond_b and cond_r2
+                
                 for etiqueta, valor in [("Pendiente (m)", f"{m:.5f}"), ("Intercepto (b)", f"{b:.5f}"), ("R2", f"{r2:.6f}")]:
                     tabla_pdf(S_MUL, "Regresión", None, [etiqueta, Caja(valor)], [1, 1])
                 tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
+                
                 if aprobado: st.success("✅ MULTIPUNTO APROBADO")
                 else: st.error("❌ MULTIPUNTO RECHAZADO")
                 
@@ -1078,7 +1097,7 @@ if es_gas:
                 
         if es_externo:
             st.divider()
-            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto")
+            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if not es_externo:
