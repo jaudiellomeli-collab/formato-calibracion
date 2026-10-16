@@ -193,6 +193,16 @@ if tipo_servicio == "Selecciona una opción...":
     st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
     st.stop()
 
+# Quién realiza el mantenimiento externo (obligatorio); se agrega al nombre del archivo y al asunto del correo
+if es_externo:
+    quien_externo = st.radio("¿Quién realiza el mantenimiento?", ["Selecciona una opción...", "Proveedor", "SIMAJ"], horizontal=True, key="k_quien")
+    if quien_externo == "Selecciona una opción...":
+        st.warning("⚠️ Selecciona si el mantenimiento lo realiza un Proveedor o SIMAJ para habilitar el formato.")
+        st.stop()
+    origen_archivo = "PROV" if quien_externo == "Proveedor" else "SIMAJ"
+else:
+    origen_archivo = "SIMAJ"
+
 st.divider()
 
 col_logo, col_menu = st.columns([1, 2.5], gap="large")
@@ -1178,7 +1188,7 @@ def nombre_base_archivo():
         marca_pm = "BAM" if es_bam else "Thermo"
         gas_cod = f"{pm_tipo}_{marca_pm}"
         
-    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{num_serie_val}"
+    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{num_serie_val}_{origen_archivo}"
 
 def nombre_pdf(): return f"{nombre_base_archivo()}.pdf"
 
@@ -1247,7 +1257,7 @@ with col_drive:
                               + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
                               + "\nSaludos.")
                     enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
-                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref}", cuerpo,
+                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref} - {origen_archivo}", cuerpo,
                                   [(nombre_del_pdf, pdf_bytes, "application/pdf")])
                     st.success("✅ Correo enviado al coordinador.")
                 except Exception as e:
