@@ -8,7 +8,7 @@ import os
 import base64
 import json
 import re
-from PIL import Image
+from PIL import Image, ImageOps
 import streamlit.components.v1 as components
 from email.message import EmailMessage
 from google.oauth2.credentials import Credentials
@@ -19,44 +19,58 @@ from pdf_formato import construir_pdf, Caja, Alerta, Neg
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
 
 # ==========================================
-# CSS GLOBAL Y COMPRESOR EXTREMO PARA PDF
+# CSS GLOBAL: CAPTURA EN PANTALLA E IMPRESIÓN DEL NAVEGADOR
+# (el PDF descargable se genera aparte en pdf_formato.py; estas reglas solo afectan la página)
 # ==========================================
 st.markdown("""
 <style>
+    /* ---------- Pantalla (captura) ---------- */
     h1, h2, h3 { color: #00B2A9 !important; font-weight: 800 !important; }
     h4 { color: #5C6670 !important; margin-bottom: 2px !important; }
     hr { border-bottom: 3px solid #F37021 !important; margin: 1.5em 0 !important; }
     .stAlert { border-left: 5px solid #00B2A9 !important; background-color: #f0fdfa !important; }
     div[data-baseweb="select"] > div { border-color: #00B2A9 !important; }
-    
+    textarea { line-height: 1.35 !important; }
+
     .header-firma { background-color: #A6A6A6; color: black; font-weight: bold; text-align: center; padding: 5px; border: 1px solid #7a7a7a; margin-bottom: 10px; font-size: 16px; }
     .linea-firma { margin-top: 40px; border-bottom: 1px solid black; width: 100%; height: 25px; }
     .header-tabla { background-color: #e0e0e0; font-weight: bold; text-align: center; padding: 4px; border: 1px solid #ccc; margin-top: 10px; margin-bottom: 5px; }
-    
+    .resumen-servicio { display: none; }
+
+    /* Fotografías: tarjetas del mismo tamaño en tres columnas */
+    [class*="st-key-galeria_"] img { aspect-ratio: 1 / 1; object-fit: contain; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; }
+
+    /* ---------- Impresión del navegador ---------- */
     @media print {
-        @page { size: letter portrait; margin: 1cm 0.5cm; }
+        @page { size: letter portrait; margin: 1cm 0.8cm; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        header, footer, .stDeployButton, [data-testid="stSidebar"], #btn-imprimir { display: none !important; }
-        div[role="radiogroup"] { display: none !important; } 
-        html, body, [class*="st-"] { font-size: 11px !important; line-height: 1.25 !important; color: black !important; }
+        header, footer, .stDeployButton, [data-testid="stSidebar"], #btn-imprimir, [data-testid="stFileUploaderDropzone"] { display: none !important; }
+        /* Los selectores del encabezado se sustituyen por un resumen legible; los demás radios sí se imprimen */
+        [class*="st-key-selector_"] { display: none !important; }
+        .resumen-servicio { display: block !important; font-size: 12px; padding: 4px 6px; border-left: 4px solid #00B2A9; background: #f0fdfa; margin: 4px 0; }
+        html, body { font-size: 11px !important; line-height: 1.3 !important; color: black !important; }
+        p, label, li, span, input, textarea { font-size: 11px !important; }
         h1 { font-size: 16px !important; margin: 8px 0 4px 0 !important; padding: 0 !important; }
         h2, h3 { font-size: 13px !important; margin: 6px 0 3px 0 !important; padding: 0 !important; }
-        h4 { font-size: 11px !important; margin: 4px 0 2px 0 !important; padding: 0 !important; font-weight: bold !important; }
+        h4 { font-size: 11.5px !important; margin: 6px 0 3px 0 !important; padding: 0 !important; font-weight: bold !important; }
         html, body, .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] { height: auto !important; overflow: visible !important; position: static !important; }
-        .main .block-container { max-width: 100% !important; padding: 0 10px !important; margin-top: -20px !important; }
-        [data-testid="column"] { padding: 0 4px !important; }
-        [data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
-        div[data-testid="stHorizontalBlock"] { gap: 0.3rem !important; align-items: center !important; }
-        input[type="text"], input[type="number"], textarea, div[data-baseweb="select"] > div {
-            font-size: 10px !important; padding: 2px 4px !important; min-height: 20px !important; height: 22px !important; border: 1px solid #a0a0a0 !important; margin: 0 !important;
-        }
+        .main .block-container, [data-testid="stMainBlockContainer"] { max-width: 100% !important; padding: 0 10px !important; }
+        [data-testid="stVerticalBlock"] { gap: 0.45rem !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0.5rem !important; align-items: flex-start !important; break-inside: avoid; page-break-inside: avoid; }
+        /* Campos: altura mínima legible y crecimiento según el contenido (nada se recorta) */
+        input[type="text"], input[type="number"] { padding: 3px 6px !important; min-height: 26px !important; height: auto !important; }
+        textarea { padding: 3px 6px !important; min-height: 26px !important; height: auto !important; field-sizing: content; overflow: visible !important; white-space: pre-wrap !important; }
+        div[data-baseweb="textarea"], div[data-baseweb="input"], div[data-baseweb="base-input"] { height: auto !important; min-height: 26px !important; overflow: visible !important; }
+        input, textarea, div[data-baseweb="select"] > div { border: 1px solid #a0a0a0 !important; }
+        div[data-baseweb="select"] > div { min-height: 26px !important; height: auto !important; }
         .stSelectbox svg, .stExpander > details > summary > svg { display: none !important; }
-        .stExpander { border: 1px solid #ddd !important; border-radius: 4px !important; margin-bottom: 6px !important; page-break-inside: avoid !important; }
-        .stExpander summary { padding: 4px 6px !important; min-height: 0 !important; background-color: #f7f7f7 !important; }
+        .stExpander { border: 1px solid #ddd !important; border-radius: 4px !important; margin-bottom: 8px !important; }
+        .stExpander summary { padding: 4px 6px !important; min-height: 0 !important; background-color: #f7f7f7 !important; break-after: avoid; page-break-after: avoid; }
         details:not([open]) { display: none !important; }
-        hr { margin: 4px 0 !important; border-color: #ddd !important; }
-        .stAlert { padding: 4px 8px !important; border-width: 1px !important; margin-bottom: 2px !important; }
-        .header-firma { font-size: 12px !important; padding: 2px !important; }
+        hr { margin: 6px 0 !important; border-color: #ddd !important; }
+        .stAlert { padding: 3px 8px !important; border-width: 1px !important; margin-bottom: 2px !important; }
+        .header-firma { font-size: 12px !important; padding: 3px !important; }
+        [class*="st-key-galeria_"] [data-testid="stColumn"] { break-inside: avoid; page-break-inside: avoid; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -72,11 +86,84 @@ def credenciales_google():
     return Credentials(None, refresh_token=cfg["refresh_token"], token_uri="https://oauth2.googleapis.com/token",
                        client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
 
+def secrets_faltantes():
+    try:
+        return [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
+    except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
+        return SECRETS_REQUERIDOS
+
+def error_google(e):
+    """Mensaje de error breve: tipo, código HTTP y motivo, sin la URL de la petición ni datos de las credenciales."""
+    estado = getattr(getattr(e, "resp", None), "status", None)
+    motivo = getattr(e, "reason", None) or (e.args[0] if e.args and isinstance(e.args[0], str) else "")
+    return type(e).__name__ + (f" (HTTP {estado})" if estado else "") + (f": {str(motivo)[:200]}" if motivo else "")
+
+# ==========================================
+# BORRADORES: SERIALIZACIÓN Y LIMPIEZA DEL FORMULARIO
+# ==========================================
+CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
+CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
+PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_")  # las fotos y sus descripciones no se guardan en el borrador
+VERSION_BORRADOR = 2
+# Opciones de versiones anteriores del formato que cambiaron de texto
+MIGRAR_OPCIONES = {"Sí 🟢": "Sí", "No 🔴": "No", "Bueno 🟢": "Bueno", "Malo 🔴": "Malo"}
+
+def _a_json(v):
+    if isinstance(v, datetime.date): return {"__fecha__": v.isoformat()}
+    if isinstance(v, datetime.time): return {"__hora__": v.strftime("%H:%M:%S")}
+    return v
+
+def _de_json(k, v, legado):
+    if isinstance(v, dict):
+        if "__fecha__" in v: return datetime.date.fromisoformat(v["__fecha__"])
+        if "__hora__" in v: return datetime.time.fromisoformat(v["__hora__"])
+        return None
+    if isinstance(v, str):
+        if k.startswith(("est_", "limp_", "reemp_")): return MIGRAR_OPCIONES.get(v, v)
+        if legado:  # los borradores anteriores guardaban fechas y horas como texto
+            if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+                try: return datetime.datetime.strptime(v, '%Y-%m-%d').date()
+                except ValueError: pass
+            elif re.match(r'^\d{2}:\d{2}(:\d{2})?$', v):
+                try: return datetime.time.fromisoformat(v)
+                except ValueError: pass
+    return v
+
+def datos_para_borrador():
+    datos = {}
+    for k, v in st.session_state.items():
+        if k in CLAVES_SIN_BORRADOR or k.startswith(PREFIJOS_SIN_BORRADOR): continue
+        if isinstance(v, (str, int, float, bool, type(None), datetime.date, datetime.time)): datos[k] = _a_json(v)
+    return {"__version__": VERSION_BORRADOR, "datos": datos}
+
+def restaurar_borrador(vista):
+    legado = vista.get("__version__") != VERSION_BORRADOR
+    datos = vista if legado else vista.get("datos", {})
+    for k, v in datos.items():
+        if k in CLAVES_SIN_BORRADOR or k.startswith(PREFIJOS_SIN_BORRADOR): continue
+        st.session_state[k] = _de_json(k, v, legado)
+
+def limpiar_formulario():
+    """Al cambiar tipo de servicio, equipo o parámetro se inicia un formulario nuevo para no mezclar datos de otro formato."""
+    conservar = set(CLAVES_SELECTOR + ["correo_borrador", "k_quien"])
+    for k in list(st.session_state.keys()):
+        if k not in conservar and not k.startswith("_"):
+            del st.session_state[k]
+
+def buscar_borrador(servicio, carpeta, nombre):
+    nombre_q = nombre.replace("\\", "\\\\").replace("'", "\\'")
+    res = servicio.files().list(q=f"name='{nombre_q}' and '{carpeta}' in parents and trashed=false", fields="files(id)").execute()
+    archivos = res.get('files', [])
+    if not archivos: return None, {}
+    archivo_id = archivos[0]['id']
+    contenido = servicio.files().get_media(fileId=archivo_id).execute()
+    return archivo_id, json.loads(contenido.decode('utf-8'))
+
 # ==========================================
 # PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
 # ==========================================
 st.sidebar.markdown("### 💾 Progreso en la Nube")
-st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos no se guardan en el borrador, súbelas al final en la computadora).**")
+st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos y sus descripciones no se guardan en el borrador, súbelas al final en la computadora).**")
 correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", key="correo_borrador", placeholder="tecnico@jalisco.gob.mx")
 
 v_tipo = st.session_state.get('k_tipo', 'Selecciona una opción...')
@@ -91,85 +178,48 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
         st.sidebar.error("Ingresa un correo.")
     elif v_est == "Selecciona una opción...":
         st.sidebar.error("Selecciona una Estación en la ventana principal primero.")
+    elif secrets_faltantes():
+        st.sidebar.error("Faltan credenciales de Google en Secrets.")
     else:
         try:
-            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-            if faltan: st.sidebar.error("Faltan credenciales de Google en Secrets.")
-            else:
-                with st.spinner("Guardando vista actual..."):
-                    servicio = build("drive", "v3", credentials=credenciales_google())
-                    carpeta = st.secrets["drive_carpeta_id"]
-                    nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                    
-                    res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                    archivos = res.get('files', [])
-                    
-                    dict_global = {}
-                    archivo_id = None
-                    if archivos:
-                        archivo_id = archivos[0]['id']
-                        req = servicio.files().get_media(fileId=archivo_id)
-                        contenido = req.execute()
-                        dict_global = json.loads(contenido.decode('utf-8'))
-                        
-                    datos_actuales = {}
-                    for k, v in st.session_state.items():
-                        if k.startswith('_') or k in ["FormSubmitter", "correo_borrador", "k_tipo", "k_gas", "k_pm", "k_est"]: continue
-                        if isinstance(v, (str, int, float, bool, type(None))): datos_actuales[k] = v
-                        elif isinstance(v, (datetime.date, datetime.time)): datos_actuales[k] = str(v)
-                        
-                    dict_global[vista_actual] = datos_actuales
-                    
-                    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
-                    if archivo_id:
-                        servicio.files().update(fileId=archivo_id, media_body=media).execute()
-                    else:
-                        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
-                        
-                    st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}.")
+            with st.spinner("Guardando vista actual..."):
+                servicio = build("drive", "v3", credentials=credenciales_google())
+                carpeta = st.secrets["drive_carpeta_id"]
+                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
+                archivo_id, dict_global = buscar_borrador(servicio, carpeta, nombre_borrador)
+                dict_global[vista_actual] = datos_para_borrador()
+                media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
+                if archivo_id:
+                    servicio.files().update(fileId=archivo_id, media_body=media).execute()
+                else:
+                    servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
+            st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}.")
         except Exception as e:
-            st.sidebar.error(f"Error al guardar: {e}")
+            st.sidebar.error(f"Error al guardar: {error_google(e)}")
 
 if col_btn2.button("📤 Cargar", use_container_width=True):
     if not correo_borrador:
         st.sidebar.error("Ingresa un correo.")
     elif v_est == "Selecciona una opción...":
         st.sidebar.error("Selecciona la Estación y Equipo a cargar en la ventana principal.")
+    elif secrets_faltantes():
+        st.sidebar.error("Faltan credenciales de Google en Secrets.")
     else:
+        dict_global = None
         try:
             with st.spinner("Cargando..."):
                 servicio = build("drive", "v3", credentials=credenciales_google())
-                carpeta = st.secrets["drive_carpeta_id"]
-                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                
-                res = servicio.files().list(q=f"name='{nombre_borrador}' and '{carpeta}' in parents and trashed=false").execute()
-                archivos = res.get('files', [])
-                if archivos:
-                    req = servicio.files().get_media(fileId=archivos[0]['id'])
-                    contenido = req.execute()
-                    dict_global = json.loads(contenido.decode('utf-8'))
-                    
-                    if vista_actual in dict_global:
-                        datos_vista = dict_global[vista_actual]
-                        for k, v in datos_vista.items():
-                            if k in ["k_tipo", "k_gas", "k_pm", "k_est", "correo_borrador"]: continue 
-                            if isinstance(v, str):
-                                if re.match(r'^\d{4}-\d{2}-\d{2}$', v):
-                                    try: v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
-                                    except: pass
-                                elif re.match(r'^\d{2}:\d{2}:\d{2}$', v) or re.match(r'^\d{2}:\d{2}$', v):
-                                    try: v = datetime.datetime.strptime(v, '%H:%M:%S').time()
-                                    except:
-                                        try: v = datetime.datetime.strptime(v, '%H:%M').time()
-                                        except: pass
-                            st.session_state[k] = v
-                        st.rerun() 
-                    else:
-                        st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
-                else:
-                    st.sidebar.warning("No se encontró ningún borrador para este correo.")
+                archivo_id, dict_global = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], f"borrador_{correo_borrador.strip()}.json")
         except Exception as e:
-            st.sidebar.error(f"Error al cargar: {e}")
+            st.sidebar.error(f"Error al cargar: {error_google(e)}")
+        if dict_global is not None:
+            if not archivo_id:
+                st.sidebar.warning("No se encontró ningún borrador para este correo.")
+            elif vista_actual in dict_global:
+                restaurar_borrador(dict_global[vista_actual])
+                st.rerun()
+            else:
+                st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
 
 # ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
@@ -185,23 +235,29 @@ equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": 
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
 # ==========================================
 st.write("<br>", unsafe_allow_html=True)
-st.markdown("#### Selecciona el Tipo de Servicio:")
-tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo"], horizontal=True, key="k_tipo", label_visibility="collapsed")
-es_externo = (tipo_servicio == "Mantenimiento Externo")
+# Los selectores van en contenedores con clave para ocultarlos al imprimir y mostrar en su lugar un resumen legible
+with st.container(key="selector_servicio"):
+    st.markdown("#### Selecciona el Tipo de Servicio:")
+    tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo"], horizontal=True,
+                             key="k_tipo", label_visibility="collapsed", on_change=limpiar_formulario)
+    es_externo = (tipo_servicio == "Mantenimiento Externo")
 
-if tipo_servicio == "Selecciona una opción...":
-    st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
-    st.stop()
-
-# Quién realiza el mantenimiento externo (obligatorio); se agrega al nombre del archivo y al asunto del correo
-if es_externo:
-    quien_externo = st.radio("¿Quién realiza el mantenimiento?", ["Selecciona una opción...", "Proveedor", "SIMAJ"], horizontal=True, key="k_quien")
-    if quien_externo == "Selecciona una opción...":
-        st.warning("⚠️ Selecciona si el mantenimiento lo realiza un Proveedor o SIMAJ para habilitar el formato.")
+    if tipo_servicio == "Selecciona una opción...":
+        st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
         st.stop()
-    origen_archivo = "PROV" if quien_externo == "Proveedor" else "SIMAJ"
-else:
-    origen_archivo = "SIMAJ"
+
+    # Quién realiza el mantenimiento externo (obligatorio); se agrega al nombre del archivo y al asunto del correo
+    if es_externo:
+        quien_externo = st.radio("¿Quién realiza el mantenimiento?", ["Selecciona una opción...", "Proveedor", "SIMAJ"], horizontal=True, key="k_quien")
+        if quien_externo == "Selecciona una opción...":
+            st.warning("⚠️ Selecciona si el mantenimiento lo realiza un Proveedor o SIMAJ para habilitar el formato.")
+            st.stop()
+        origen_archivo = "PROV" if quien_externo == "Proveedor" else "SIMAJ"
+    else:
+        quien_externo = "SIMAJ"
+        origen_archivo = "SIMAJ"
+    st.caption("Cambiar el tipo de servicio, el equipo o el parámetro inicia un formato nuevo. Guarda tu avance antes de cambiar.")
+es_proveedor = es_externo and quien_externo == "Proveedor"
 
 st.divider()
 
@@ -210,12 +266,17 @@ with col_logo:
     if os.path.exists("simaj.png"): st.image("simaj.png", width=250)
     else: st.markdown("<h1 style='color:#00B2A9;'>SIMAJ</h1>", unsafe_allow_html=True)
 
-with col_menu:
+with col_menu, st.container(key="selector_equipo"):
     st.markdown("#### Selecciona el Equipo a Calibrar:")
-    gas_sel = st.radio("Selecciona el Equipo:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"], horizontal=True, label_visibility="collapsed", key="k_gas")
+    gas_sel = st.radio("Selecciona el Equipo:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"],
+                       horizontal=True, label_visibility="collapsed", key="k_gas", on_change=limpiar_formulario)
     pm_tipo = "N/A"
     if gas_sel in ["PM BAM", "PM Thermo"]:
-        pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm")
+        pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm", on_change=limpiar_formulario)
+
+texto_servicio = tipo_servicio + (f" (realizado por: {quien_externo})" if es_externo else "")
+texto_equipo = gas_sel if pm_tipo == "N/A" else f"{gas_sel} ({pm_tipo})"
+st.markdown(f"<div class='resumen-servicio'><b>Tipo de servicio:</b> {texto_servicio} &nbsp;|&nbsp; <b>Equipo:</b> {texto_equipo}</div>", unsafe_allow_html=True)
 
 st.divider()
 datos_resumen = {}
@@ -258,6 +319,12 @@ tec_empresa_def = "" if es_externo else "Secretaría de Medio Ambiente y Desarro
 tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
 sup_nombre_def = "" if es_externo else "Beatriz Rodriguez Perez"
 sup_empresa_def = "" if es_externo else "Desarrollo Territorial"
+# Las fechas de certificado corresponden a los calibradores de SIMAJ; en mantenimiento externo se capturan
+fecha_cal_pm_def = None if es_externo else datetime.date(2026, 1, 20)
+fecha_cal1_def = None if es_externo else datetime.date(2026, 6, 20)
+fecha_cal2_def = None if es_externo else datetime.date(2026, 8, 8)
+# Solo un proveedor externo lleva "empresa"; si el servicio lo hace SIMAJ el dato es la institución
+etq_empresa_tec = "Empresa proveedora" if es_proveedor else "Institución"
 
 # ==========================================
 # ENCABEZADO
@@ -291,10 +358,16 @@ pdf_secciones = {}
 pdf_ctx = {"sec": "", "sub": ""}
 
 def _sec(nombre):
-    return pdf_secciones.setdefault(nombre, {"pares": [], "tablas": {}, "textos": [], "notas": [], "fotos": []})
+    return pdf_secciones.setdefault(nombre, {"pares": [], "tablas": {}, "textos": [], "textos_final": [], "notas": [], "graficas": [], "fotos": []})
+
+# Opciones de selección que significan "sin capturar": no son un dato definitivo del reporte
+SIN_DATO = ("-", "Selecciona una opción...")
+
+def valor_pdf(valor):
+    return "" if isinstance(valor, str) and valor in SIN_DATO else valor
 
 def kv(seccion, etiqueta, valor, grupo=""):
-    _sec(seccion)["pares"].append((etiqueta, valor, grupo))
+    _sec(seccion)["pares"].append((etiqueta, valor_pdf(valor), grupo))
     return valor
 
 def tabla_pdf(seccion, nombre, encabezado, fila, pesos=None, barra=False):
@@ -325,7 +398,7 @@ def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
     with c7: r_fin = evaluar_y_mostrar(val_fin, min_val, max_val)
     tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(val_ini), _res(r_ini), Caja(val_fin), _res(r_fin)], PESOS_PG)
-    return r_ini, r_fin 
+    return r_ini, r_fin
 
 def fila_libre(param, unit, ideal_str, key):
     c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
@@ -333,46 +406,88 @@ def fila_libre(param, unit, ideal_str, key):
     with c2: st.write(unit)
     with c3: st.write(ideal_str)
     with c4: v_ini = st.text_input("ini", key=f"ini_{key}", label_visibility="collapsed")
-    with c5: c_ini = st.text_input("c_ini", key=f"c_ini_{key}", label_visibility="collapsed")
+    with c5: c_ini = st.text_area("c_ini", key=f"c_ini_{key}", label_visibility="collapsed", height="content")
     with c6: v_fin = st.text_input("fin", key=f"fin_{key}", label_visibility="collapsed")
-    with c7: c_fin = st.text_input("c_fin", key=f"c_fin_{key}", label_visibility="collapsed")
+    with c7: c_fin = st.text_area("c_fin", key=f"c_fin_{key}", label_visibility="collapsed", height="content")
     tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(v_ini), Caja(c_ini), Caja(v_fin), Caja(c_fin)], PESOS_PG)
     return None, None
 
+# Estado / limpieza / reemplazo: el valor guardado es el texto; el ícono solo se agrega al mostrarlo.
+# "No" no lleva indicador de color (no limpiar o no reemplazar no es una falla) y "-" significa sin capturar.
+OPC_ESTADO = ["-", "Bueno", "Malo"]
+OPC_SINO = ["-", "Sí", "No"]
+ICONOS_OPCION = {"Bueno": "Bueno 🟢", "Malo": "Malo 🔴", "Sí": "Sí ✅"}
+
+def _ver_opcion(v):
+    return ICONOS_OPCION.get(v, v)
+
+def indicador_pdf(v):
+    if v in ("Bueno", "Sí"): return Alerta(v, True)
+    if v == "Malo": return Alerta(v, False)
+    return Caja(valor_pdf(v))
+
 def fila_comp(nombre, key, placeholder="Especificar..."):
-    c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
+    c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3], vertical_alignment="top")
     with c1: st.write(nombre)
-    with c2: estado = st.selectbox("Estado", ["-", "Bueno 🟢", "Malo 🔴"], key=f"est_{key}", label_visibility="collapsed")
-    with c3: limpieza = st.selectbox("Limpieza", ["-", "Sí 🟢", "No 🔴"], key=f"limp_{key}", label_visibility="collapsed")
-    with c4: reemplazo = st.selectbox("Reemplazo", ["-", "Sí 🟢", "No 🔴"], key=f"reemp_{key}", label_visibility="collapsed")
-    with c5: obs = st.text_input("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed")
+    with c2: estado = st.selectbox("Estado", OPC_ESTADO, key=f"est_{key}", label_visibility="collapsed", format_func=_ver_opcion)
+    with c3: limpieza = st.selectbox("Limpieza", OPC_SINO, key=f"limp_{key}", label_visibility="collapsed", format_func=_ver_opcion)
+    with c4: reemplazo = st.selectbox("Reemplazo", OPC_SINO, key=f"reemp_{key}", label_visibility="collapsed", format_func=_ver_opcion)
+    with c5: obs = st.text_area("Obs", placeholder=placeholder, key=f"obs_{key}", label_visibility="collapsed", height="content")
     tabla_pdf(pdf_ctx["sec"], "", ["Componente", "Estado", "Limpieza", "Reemplazo", "Observaciones"],
-              [nombre, Caja(estado), Caja(limpieza), Caja(reemplazo), Caja(obs, placeholder)], [2.5, 1, 1, 1, 3])
+              [nombre, indicador_pdf(estado), indicador_pdf(limpieza), indicador_pdf(reemplazo), Caja(obs, placeholder)], [2.2, 1.1, 1.1, 1.1, 3])
 
 def fila_simple(nombre, key, ph="No se realizó"):
-    c1, c2 = st.columns([1, 2])
+    c1, c2 = st.columns([1, 2], vertical_alignment="top")
     with c1: st.write(nombre)
-    with c2: obs = st.text_input("obs", key=key, label_visibility="collapsed", placeholder=ph)
+    with c2: obs = st.text_area("obs", key=key, label_visibility="collapsed", placeholder=ph, height="content")
     tabla_pdf(pdf_ctx["sec"], pdf_ctx["sub"], None, [nombre, Caja(obs, ph)], [1, 2], barra=True)
+
+LADO_FOTO = 600  # px de la miniatura cuadrada: suficiente para ver detalles en el PDF sin hacerlo pesado
+
+@st.cache_data(max_entries=200, show_spinner=False)
+def procesar_foto(datos):
+    """Valida la imagen, corrige la orientación EXIF y devuelve una miniatura JPEG cuadrada: la foto completa
+    centrada sobre fondo blanco, sin deformarla ni recortarla. Lanza una excepción si el archivo no es una imagen válida."""
+    with Image.open(io.BytesIO(datos)) as img:
+        img.verify()  # detecta archivos dañados o que no son imagen
+    with Image.open(io.BytesIO(datos)) as img:
+        img.draft("RGB", (LADO_FOTO * 2, LADO_FOTO * 2))  # JPEG grandes: decodifica a menor resolución y ahorra memoria
+        img = ImageOps.exif_transpose(img)
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            fondo = Image.new("RGB", img.size, "white")
+            fondo.paste(img, mask=img.getchannel("A"))
+            img = fondo
+        img = img.convert("RGB")
+        img.thumbnail((LADO_FOTO, LADO_FOTO), Image.Resampling.LANCZOS)
+        cuadro = ImageOps.pad(img, (LADO_FOTO, LADO_FOTO), color="white")
+    buf = io.BytesIO()
+    cuadro.save(buf, "JPEG", quality=72, optimize=True)
+    return buf.getvalue()
 
 def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc_default=""):
     """Dibuja el uploader de imágenes e incrusta las fotos directamente en la sección del PDF."""
     st.markdown(f"**{titulo}**")
     fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=multiple, key=f"up_{key_prefix}")
-    if fotos_subidas:
-        lista_fotos = fotos_subidas if multiple else [fotos_subidas]
-        cols = st.columns(3)
-        for i, foto in enumerate(lista_fotos):
-            with cols[i % 3]:
-                img = Image.open(foto)
-                img.thumbnail((800, 800))
-                st.image(img, use_container_width=True)
-                desc_foto = st.text_input("Descripción:", value=desc_default if not multiple else "", key=f"desc_{key_prefix}_{i}", placeholder="Ej. Detalle...")
-                miniatura = img.convert("RGB")
-                miniatura.thumbnail((500, 500))
-                buf_foto = io.BytesIO()
-                miniatura.save(buf_foto, "JPEG", quality=60, optimize=True)
-                _sec(seccion_id)["fotos"].append((buf_foto.getvalue(), desc_foto))
+    if not fotos_subidas: return
+    lista_fotos = fotos_subidas if multiple else [fotos_subidas]
+    with st.container(key=f"galeria_{key_prefix}"):
+        # una fila de columnas por cada tres fotos: una descripción larga no se encima con las fotos de la fila siguiente
+        for inicio in range(0, len(lista_fotos), 3):
+            cols = st.columns(3, gap="medium")
+            for col, foto in zip(cols, lista_fotos[inicio:inicio + 3]):
+                with col:
+                    try:
+                        datos = procesar_foto(foto.getvalue())
+                    except Exception:
+                        st.warning(f"«{foto.name}» no es una imagen válida y no se incluirá en el reporte.")
+                        continue
+                    st.image(datos, use_container_width=True)
+                    # la clave sigue al archivo (no a su posición) para que cada descripción se quede con su foto
+                    ident = getattr(foto, "file_id", None) or f"{foto.name}_{foto.size}"
+                    desc_foto = st.text_area("Descripción:", value=desc_default if not multiple else "", key=f"desc_fot_{key_prefix}_{ident}",
+                                             placeholder="Ej. Detalle...", height="content")
+                    _sec(seccion_id)["fotos"].append((datos, desc_foto))
 
 # ==========================================
 # 1. DATOS DEL ANALIZADOR
@@ -380,7 +495,10 @@ def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc
 with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded=True):
     col_izq, col_der = st.columns([1, 1.2])
     with col_izq:
+        kv(S_DAT, "Tipo de servicio", texto_servicio)
         estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
+        if st.session_state.get("k_est") not in estaciones:  # p. ej. al cambiar a un equipo que no existe en esa estación
+            st.session_state["k_est"] = estaciones[0]
         estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones, key="k_est"))
         
         fab_final = "ACOEM" if es_gas else ("Met One" if es_bam else "Thermo Fisher")
@@ -401,7 +519,9 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
-        if falla == "Sí 🔴": kv(S_DAT, "Descripción de falla", st.text_area("Descripción de Falla o Alarma", key="desc_falla"))
+        if falla == "Sí 🔴":
+            desc_falla = st.text_area("Descripción de Falla o Alarma", key="desc_falla", height="content")
+            _sec(S_DAT)["textos_final"].append(("Descripción de falla o alarma", desc_falla, ""))
 
         datos_resumen["Estación"] = estacion_sel
         datos_resumen["Gas Calibrado"] = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
@@ -419,8 +539,8 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             st.markdown("### Inicial")
             fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_ini"), "Inicial")
             kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None, key="hora_ini"), "Inicial")
-            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=0.0, key="temp_ext_ini"), "Inicial")
-            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=0.0, key="temp_int_ini"), "Inicial")
+            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=None, key="temp_ext_ini"), "Inicial")
+            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=None, key="temp_int_ini"), "Inicial")
             datos_resumen["Fecha de Servicio"] = str(fecha_ref)
             año_f, mes_f, dia_f = fecha_ref.strftime("%Y"), fecha_ref.strftime("%m"), fecha_ref.strftime("%d")
             
@@ -428,8 +548,8 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             st.markdown("### Final")
             kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_fin"), "Final")
             kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None, key="hora_fin"), "Final")
-            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=0.0, key="temp_ext_fin"), "Final")
-            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=0.0, key="temp_int_fin"), "Final")
+            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=None, key="temp_ext_fin"), "Final")
+            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=None, key="temp_int_fin"), "Final")
 
 # ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
@@ -488,7 +608,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.4 - 4", 1.4, 4.0, "o3_v_ref"))
         procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "9.5 - 10.5", 9.5, 10.5, "o3_c_lamp"))
         procesar_resultado(*fila_regla("Temperatura de la lámpara", "°C", "45 - 55", 45.0, 55.0, "o3_t_lamp"))
-        procesar_resultado(*fila_regla("Pot de la lámpara UV", "N/A", "254", 254.0, 254.0, "o3_pot"))
+        procesar_resultado(*fila_regla("Pot de la lámpara UV", "N/A", "255", 255.0, 255.0, "o3_pot"))
         procesar_resultado(*fila_regla("Temperatura del Chassis", "°C", "0 - 50", 0.0, 50.0, "o3_t_chas"))
         procesar_resultado(*fila_regla("Temperatura del flujo", "°C", "10 - 90", 10.0, 90.0, "o3_t_flujo"))
         procesar_resultado(*fila_regla("INPUT (Pots)", "N/A", "50-200", 50.0, 200.0, "o3_in"))
@@ -590,7 +710,7 @@ if es_particulas:
         with col_c2:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value="Comexsa" if not es_externo else "", key="pm_cal_lab")
-            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 1, 20), key="pm_cal_fecha")
+            st.date_input("Fecha de calibración/certificado", fecha_cal_pm_def, key="pm_cal_fecha")
             st.text_input("No de certificado", value="E252677468" if not es_externo else "", key="pm_cal_cert")
         for etiqueta, k, grupo in [("Marca", "pm_cal_mca", "Calibrador (Sensores y Flujo)"), ("Modelo", "pm_cal_mod", "Calibrador (Sensores y Flujo)"),
                                    ("N/S", "pm_cal_ns", "Calibrador (Sensores y Flujo)"), ("Laboratorio", "pm_cal_lab", "Certificación"),
@@ -599,108 +719,182 @@ if es_particulas:
 
         st.divider()
 
+        def comentario(key, columna=None):
+            destino = columna or st
+            return destino.text_area("Comentarios", label_visibility="collapsed", key=key, placeholder="Comentarios...", height="content")
+
         if es_thermo:
+            def sensor_3p(titulo, limite_dif, val_ideal_desc):
+                """Verificación de un sensor con tres lecturas calibrador/monitor y su promedio."""
+                pesos = [1, 1, 1, 2]
+                enc = ["Calibrador", "Monitor", "Diferencia", "Comentarios"]
+                st.markdown(f"#### {titulo}")
+                c1, c2, c3, c4 = st.columns(pesos)
+                c1.write("**Calibrador**"); c2.write("**Monitor**"); c3.write("**Diferencia**"); c4.write("**Comentarios**")
+
+                cal_v, mon_v = [], []
+                for i in range(1, 4):
+                    c1, c2, c3, c4 = st.columns(pesos)
+                    c_val = c1.number_input(f"c{i}", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
+                    m_val = c2.number_input(f"m{i}", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
+                    dif_txt = f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-"
+                    c3.write(dif_txt)
+                    tabla_pdf(S_SENS, titulo, enc, [Caja(c_val), Caja(m_val), dif_txt, ""], pesos)
+                    if c_val is not None: cal_v.append(c_val)
+                    if m_val is not None: mon_v.append(m_val)
+
+                prom_c = sum(cal_v) / len(cal_v) if cal_v else None
+                prom_m = sum(mon_v) / len(mon_v) if mon_v else None
+                c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="top")
+                c1.write(f"**{prom_c:.2f}**" if prom_c is not None else "Promedio")
+                c2.write(f"**{prom_m:.2f}**" if prom_m is not None else "Promedio")
+                dif_pdf = "-"
+                if prom_c is not None and prom_m is not None:
+                    dif_prom = prom_m - prom_c
+                    ok = abs(dif_prom) <= limite_dif
+                    (c3.success if ok else c3.error)(f"{dif_prom:.2f} " + ("✅" if ok else "❌"))
+                    dif_pdf = Alerta(f"{dif_prom:.2f} - " + ("Cumple" if ok else "NO CUMPLE"), ok)
+                else:
+                    c3.write("-")
+                obs_sensor = comentario(f"{titulo}_obs", c4)
+                tabla_pdf(S_SENS, titulo, enc, [Neg(f"{prom_c:.2f}" if prom_c is not None else "Promedio"),
+                                                Neg(f"{prom_m:.2f}" if prom_m is not None else "Promedio"), dif_pdf,
+                                                Caja(obs_sensor, "Comentarios...")], pesos)
+                nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
+                st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
+
+            sensor_3p("Temperatura Ambiente", 2.0, "La diferencia debe ser menor a ± 2 °C")
+            sensor_3p("Humedad Relativa", 2.0, "La diferencia debe ser menor a ± 2 %")
+            sensor_3p("Temperatura de flujo", 2.0, "La diferencia debe ser menor a ± 2 °C")
+            st.divider()
+
+            pesos_baro = [1.1, 1, 1, 1, 2.2]
+            enc_baro = ["", "Calibrador", "Monitor", "Diferencia (mmHg)", "Comentarios"]
             st.markdown("#### Presión Barométrica")
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
-            c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Comentarios**")
-            
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
-            c1.write("Lectura")
-            c_bar1 = c2.number_input("C_bar_l", label_visibility="collapsed", value=None, key="C_bar_l")
-            m_bar1 = c3.number_input("M_bar_l", label_visibility="collapsed", value=None, key="M_bar_l")
-            obs_bar1 = c4.text_input("obs_bar_l", label_visibility="collapsed", key="obs_bar1", placeholder="Comentarios...")
-            if c_bar1 and m_bar1: st.write(f"<small>Diferencia: {abs(m_bar1-c_bar1):.1f} mmHg (Debe ser menor a ± 10 mmHg)</small>", unsafe_allow_html=True)
-            
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
-            c1.write("Calibración")
-            c_bar2 = c2.number_input("C_bar_c", label_visibility="collapsed", value=None, key="C_bar_c")
-            m_bar2 = c3.number_input("M_bar_c", label_visibility="collapsed", value=None, key="M_bar_c")
-            obs_bar2 = c4.text_input("obs_bar_c", label_visibility="collapsed", key="obs_bar2", placeholder="Comentarios...")
-            if c_bar2 and m_bar2: st.write(f"<small>Diferencia: {abs(m_bar2-c_bar2):.1f} mmHg (Debe ser menor a ± 2 mmHg)</small>", unsafe_allow_html=True)
+            c1, c2, c3, c4, c5 = st.columns(pesos_baro)
+            c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Diferencia (mmHg)**"); c5.write("**Comentarios**")
+            for fila_baro, k_cal, k_mon, k_obs, limite in [("Lectura", "C_bar_l", "M_bar_l", "obs_bar1", 10), ("Calibración", "C_bar_c", "M_bar_c", "obs_bar2", 2)]:
+                c1, c2, c3, c4, c5 = st.columns(pesos_baro, vertical_alignment="top")
+                c1.write(fila_baro)
+                c_bar = c2.number_input(k_cal, label_visibility="collapsed", value=None, key=k_cal)
+                m_bar = c3.number_input(k_mon, label_visibility="collapsed", value=None, key=k_mon)
+                dif_bar = f"{abs(m_bar - c_bar):.1f}" if c_bar is not None and m_bar is not None else ""
+                c4.write(dif_bar or "-")
+                obs_bar = comentario(k_obs, c5)
+                st.write(f"<small>{fila_baro}: la diferencia debe ser menor a ± {limite} mmHg</small>", unsafe_allow_html=True)
+                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, [fila_baro, Caja(c_bar), Caja(m_bar), dif_bar, Caja(obs_bar)], pesos_baro)
+            nota_pdf(S_SENS, "Presión barométrica: diferencia menor a ± 10 mmHg en la lectura y menor a ± 2 mmHg después de la calibración.")
 
-            enc_baro = ["", "Calibrador", "Monitor", "Comentarios"]
-            tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Lectura", Caja(c_bar1), Caja(m_bar1), Caja(obs_bar1)])
-            tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, ["Calibración", Caja(c_bar2), Caja(m_bar2), Caja(obs_bar2)])
-
+            pesos_pfs = [1, 1.4, 1, 1, 2]
             st.markdown("#### Presión de Flujo de span (mmHg)")
-            c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1.5])
+            c1, c2, c3, c4, c5 = st.columns(pesos_pfs)
             c1.write(""); c2.write("**Manómetro Certificado**"); c3.write("**Monitor Inicial**"); c4.write("**Monitor Final**"); c5.write("**Comentarios**")
-            
-            c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1.5])
+
+            c1, c2, c3, c4, c5 = st.columns(pesos_pfs, vertical_alignment="top")
             c1.write("Lectura")
             man_dif = c2.number_input("man_dif", label_visibility="collapsed", value=None, key="pfs_man")
             mon_ini = c3.number_input("mon_ini", label_visibility="collapsed", value=None, key="pfs_mini")
             mon_fin = c4.number_input("mon_fin", label_visibility="collapsed", value=None, key="pfs_mfin")
-            obs_pfs = c5.text_input("obs_pfs", label_visibility="collapsed", key="obs_pfs", placeholder="Comentarios...")
-            
+            obs_pfs = comentario("obs_pfs", c5)
+
             enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final", "Comentarios"]
-            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin), Caja(obs_pfs)])
+            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin), Caja(obs_pfs)], pesos_pfs)
 
             def render_flujo_thermo(titulo, key_prefix):
+                pesos_flujo = [1, 1, 1, 1, 2]
                 st.markdown(f"#### {titulo} (Lpm)")
-                c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1.5])
+                c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
                 c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**% Desviación**"); c5.write("**Comentarios**")
 
-                c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1.5])
+                c1, c2, c3, c4, c5 = st.columns(pesos_flujo, vertical_alignment="top")
                 c1.write("Lectura")
                 f_cal = c2.number_input("f_cal", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
                 f_mon = c3.number_input("f_mon", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
-                obs_flujo = c5.text_input("obs_flujo", label_visibility="collapsed", key=f"{key_prefix}_obs", placeholder="Comentarios...")
-                
+                obs_flujo = comentario(f"{key_prefix}_obs", c5)
+
                 desv_str = ""
-                if f_cal and f_mon:
+                if f_cal and f_mon is not None:
                     desv = ((f_mon - f_cal) / f_cal) * 100
                     desv_str = f"{desv:.2f}%"
-                    c4.write(f"**{desv_str}**")
-                    
+                c4.write(f"**{desv_str}**" if desv_str else "-")
+
                 st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.</small>", unsafe_allow_html=True)
-                
+
                 enc_flujo = ["", "Calibrador", "Monitor", "% Desviación", "Comentarios"]
-                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, Caja(obs_flujo)])
+                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, Caja(obs_flujo)], pesos_flujo)
 
             render_flujo_thermo("Flujo Automático", "fauto")
             render_flujo_thermo("Flujo Manual", "fman")
+            nota_pdf(S_SENS, "Flujo: el valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.")
 
         elif es_bam:
-            st.markdown("#### Flujo en Litros por Minuto")
-            c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
-            with c1: st.write("**Calibrador (lpm)**")
-            with c2: st.write("**Monitor (lpm)**")
-            with c3: st.write("**Comentarios**")
-            with c4: st.write("**Requirió Ajuste**")
-            
-            cal_targets = [15.0, 18.43, 16.67]
-            monitor_vals = []
-            for idx, target in enumerate(cal_targets):
-                c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
-                with c1: st.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
-                with c2: 
-                    m_val = st.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
-                    if m_val is not None: monitor_vals.append(m_val)
-                with c3:
-                    if idx == 0: st.text_area("Observaciones Generales", key=f"bam_f_obs_{pm_tipo}", height=90, label_visibility="collapsed")
-                with c4:
-                    if idx == 0: st.radio("¿Calibró?", ["No", "Sí"], key=f"bam_f_cal_{pm_tipo}", horizontal=True, label_visibility="collapsed")
-                tabla_pdf(S_SENS, "Flujo en Litros por Minuto", ["Calibrador (lpm)", "Monitor (lpm)", "Comentarios", "Requirió Ajuste"],
-                          [Caja(target), Caja(st.session_state.get(f"bam_fm_{idx}_{pm_tipo}")),
-                           Caja(st.session_state.get(f"bam_f_obs_{pm_tipo}")) if idx == 0 else "", Caja(st.session_state.get(f"bam_f_cal_{pm_tipo}")) if idx == 0 else ""],
-                          [1, 1, 2, 1])
-            
-            c1, c2, c3 = st.columns([1, 1, 3])
-            with c1: st.write("**Promedio:**")
-            promedio_bam = sum(monitor_vals)/len(monitor_vals) if monitor_vals else None
-            with c2: 
-                if promedio_bam is not None: st.write(f"**{promedio_bam:.2f}**")
-            with c3:
-                if promedio_bam is not None:
-                    cumple_bam = 16.00 <= promedio_bam <= 17.34
-                    if cumple_bam: st.success("Cumple ✅")
-                    else: st.error("NO CUMPLE ❌")
-                    tabla_pdf(S_SENS, "", None, ["Promedio", f"{promedio_bam:.2f}", _res(cumple_bam), ""], [1, 1, 2, 1])
-                    
+            # Criterio existente del formato: el flujo debe ser 16.67 ± 0.67 lpm (16.00 a 17.34)
+            FLUJO_BAM_NOMINAL, FLUJO_BAM_MIN, FLUJO_BAM_MAX = 16.67, 16.00, 17.34
+
+            # --- Etapa 1: verificación en el punto nominal ---
+            pesos_verif = [1, 1, 1.2, 2.3]
+            st.markdown("#### Verificación de flujo (lpm)")
+            c1, c2, c3, c4 = st.columns(pesos_verif)
+            c1.write("**Calibrador (lpm)**"); c2.write("**Monitor (lpm)**"); c3.write("**Resultado**"); c4.write("**Comentarios**")
+            c1, c2, c3, c4 = st.columns(pesos_verif, vertical_alignment="top")
+            c1.number_input("Calibrador verificación", value=FLUJO_BAM_NOMINAL, disabled=True, label_visibility="collapsed", key=f"bam_fv_cal_{pm_tipo}")
+            verif_mon = c2.number_input("Monitor verificación", value=None, label_visibility="collapsed", key=f"bam_fv_mon_{pm_tipo}")
+            cumple_verif = None if verif_mon is None else FLUJO_BAM_MIN <= verif_mon <= FLUJO_BAM_MAX
+            with c3: evaluar_y_mostrar(verif_mon, FLUJO_BAM_MIN, FLUJO_BAM_MAX)
+            obs_verif = comentario(f"bam_fv_obs_{pm_tipo}", c4)
+            tabla_pdf(S_SENS, "Verificación de flujo (lpm)", ["Calibrador (lpm)", "Monitor (lpm)", "Resultado", "Comentarios"],
+                      [Caja(FLUJO_BAM_NOMINAL), Caja(verif_mon), _res(cumple_verif), Caja(obs_verif)], pesos_verif)
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
+
+            # --- Etapa 2: ajuste en tres puntos, solo si la verificación no cumple ---
+            cumple_final_bam = cumple_verif
+            if cumple_verif is None:
+                st.info("Captura la lectura del monitor para saber si se requiere ajuste de flujo.")
+            else:
+                st.markdown(f"#### ¿Requiere ajuste de flujo?: **{'No' if cumple_verif else 'SÍ'}**")
+                nota_pdf(S_SENS, f"¿Requiere ajuste de flujo?: {'No' if cumple_verif else 'SÍ'}")
+
+            if cumple_verif is False:
+                pesos_ajuste = [1, 1, 1.2]
+                enc_ajuste = ["Calibrador (lpm)", "Monitor (lpm)", "Resultado"]
+                st.markdown("#### Ajuste de flujo (lpm)")
+                c1, c2, c3 = st.columns(pesos_ajuste)
+                c1.write("**Calibrador (lpm)**"); c2.write("**Monitor (lpm)**"); c3.write("")
+
+                cal_targets = [15.0, 18.43, 16.67]
+                monitor_vals = []
+                for idx, target in enumerate(cal_targets):
+                    c1, c2, c3 = st.columns(pesos_ajuste)
+                    c1.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
+                    m_val = c2.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
+                    if m_val is not None: monitor_vals.append(m_val)
+                    tabla_pdf(S_SENS, "Ajuste de flujo (lpm)", enc_ajuste, [Caja(target), Caja(m_val), ""], pesos_ajuste)
+
+                # el promedio se evalúa cuando están las tres lecturas del ajuste
+                promedio_bam = sum(monitor_vals) / len(monitor_vals) if len(monitor_vals) == len(cal_targets) else None
+                c1, c2, c3 = st.columns(pesos_ajuste)
+                c1.write("**Promedio:**")
+                cumple_final_bam = None
+                if promedio_bam is not None:
+                    c2.write(f"**{promedio_bam:.2f}**")
+                    with c3: cumple_final_bam = evaluar_y_mostrar(promedio_bam, FLUJO_BAM_MIN, FLUJO_BAM_MAX)
+                    tabla_pdf(S_SENS, "Ajuste de flujo (lpm)", enc_ajuste, [Neg("Promedio"), Neg(f"{promedio_bam:.2f}"), _res(cumple_final_bam)], pesos_ajuste)
+                else:
+                    c2.write("-")
+                    c3.caption("Captura las tres lecturas del monitor.")
+
+                st.markdown("**Observaciones del ajuste**")
+                obs_ajuste = st.text_area("Observaciones del ajuste", key=f"bam_f_obs_{pm_tipo}", label_visibility="collapsed",
+                                          placeholder="Comentarios...", height="content")
+                tabla_pdf(S_SENS, "Observaciones del ajuste", None, [Caja(obs_ajuste, "Comentarios...")], [1])
+
+            if cumple_final_bam is not None:
+                texto_final = "Cumple" if cumple_final_bam else "NO CUMPLE"
+                if cumple_verif is False: texto_final += " (después del ajuste)"
+                (st.success if cumple_final_bam else st.error)(f"Resultado final del flujo: {texto_final}")
+                nota_pdf(S_SENS, f"Resultado final del flujo: {texto_final}")
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
-            
+
         if es_externo:
             st.divider()
             renderizar_fotos_seccion(S_SENS, "📷 Evidencias de Sensores y Flujo", "fot_sens", multiple=True)
@@ -712,24 +906,27 @@ if es_particulas:
             st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
             st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
         with col_cm2:
-            st.date_input("Fecha de Certificación de Foils", datetime.date(2025, 11, 12), key="cm_fecha")
-            st.number_input("Mass Coefficient Inicial", value=7000.0, key="cm_mass_ini")
-        
+            # Sin fecha ni coeficiente predeterminados: dependen del juego de foils y del equipo. Se capturan o se
+            # recuperan con el borrador de esta estación/equipo (botón Cargar).
+            st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
+            st.number_input("Mass Coefficient Inicial", value=None, key="cm_mass_ini", placeholder="Valor actual del equipo",
+                            help="Es propio de cada equipo: captúralo de la pantalla del monitor o de su registro anterior.")
+
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         with c1: st.write("**Lectura**")
         with c2: st.write("**Foil Value Span (Ideal)**")
         with c3: st.write("**Beta Average (Lectura del equipo)**")
-        
+
         c1, c2, c3 = st.columns(3)
         with c1: st.write("Calibración Cero")
         with c2: st.write("N/A")
-        with c3: st.number_input("Beta Cero", value=0.0, key="cm_beta_cero", label_visibility="collapsed")
-        
+        with c3: st.number_input("Beta Cero", value=None, key="cm_beta_cero", label_visibility="collapsed")
+
         c1, c2, c3 = st.columns(3)
         with c1: st.write("Calibración Span")
         with c2: st.number_input("Span Ideal", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
-        with c3: st.number_input("Beta Span", value=0.0, key="cm_beta_span", label_visibility="collapsed")
+        with c3: st.number_input("Beta Span", value=None, key="cm_beta_span", label_visibility="collapsed")
 
         for etiqueta, k in [("Equipo de calibración (foils)", "cm_eq"), ("Reference No. / Certificado", "cm_ref"),
                             ("Fecha de certificación de foils", "cm_fecha"), ("Mass Coefficient inicial", "cm_mass_ini")]:
@@ -737,7 +934,7 @@ if es_particulas:
         enc_masas = ["Lectura", "Foil Value Span (Ideal)", "Beta Average (Lectura del equipo)"]
         tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
         tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
-        
+
         if es_externo:
             st.divider()
             renderizar_fotos_seccion(S_MAS, "📷 Evidencia de Calibración de Masas", "fot_mas", multiple=True)
@@ -758,7 +955,7 @@ if es_gas:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value=lab_cal1_def, key="lab_cal1")
             st.text_input("Técnico", value=tec_cal1_def, key="tec_cal1")
-            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 6, 20), key="vig_cal1")
+            st.date_input("Fecha de calibración/certificado", fecha_cal1_def, key="vig_cal1")
             st.text_input("No de certificado", value=cert_cal1_def, key="cert_cal1")
 
         for etiqueta, k, grupo in [("Fabricante", "fab_cal1", "Calibrador de Flujo"), ("Modelo", "mod_cal1", "Calibrador de Flujo"),
@@ -768,52 +965,52 @@ if es_gas:
             kv(S_FLU, etiqueta, st.session_state.get(k), grupo)
 
         def render_tabla_flujo_gases(titulo, key_prefix):
+            """Devuelve (lectura volumétrica, cumple). Sin lectura no hay evaluación (None)."""
+            pesos_flujo = [2, 1, 1.5, 1.5, 1.5]
+            enc_flujo = ["Parámetro", "Ideal", "Medición", "% Desviación", "Resultado"]
             st.markdown(f"#### {titulo}")
-            c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1.5, 1.5])
+            c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
             with c1: st.write("Flujo Estandar (scc/min)")
             with c2: st.write("-")
-            with c3: st.number_input("val_est", key=f"{key_prefix}_est", label_visibility="collapsed")
+            with c3: val_est = st.number_input("val_est", key=f"{key_prefix}_est", label_visibility="collapsed", value=None)
             with c4: st.write("-")
             with c5: st.write("-")
 
-            c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1.5, 1.5])
+            c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
             with c1: st.write("Flujo Volumétrico (cc/min)")
             with c2: st.write(str(flujo_ideal_vol))
-            with c3: val = st.number_input("val_vol", key=f"{key_prefix}_vol", label_visibility="collapsed")
-            
-            resultado_cumple = None
+            with c3: val = st.number_input("val_vol", key=f"{key_prefix}_vol", label_visibility="collapsed", value=None)
+
+            resultado_cumple, desv_txt = None, ""
             if val is not None:
-                desv = ((val - flujo_ideal_vol) / flujo_ideal_vol)
+                desv = (val - flujo_ideal_vol) / flujo_ideal_vol
                 resultado_cumple = abs(desv) <= flujo_tol
-                
-            with c4: 
-                if val: st.write(f"{desv*100:.2f}%")
+                desv_txt = f"{desv * 100:.2f}%"
+            with c4: st.write(desv_txt or "-")
             with c5:
                 if resultado_cumple is not None:
                     if resultado_cumple: st.success("Cumple ✅")
                     else: st.error("NO CUMPLE ❌")
                 else: st.write("-")
-                
-            pesos_flujo = [2, 1, 1.5, 1.5]
-            
-            c_est = st.session_state.get(f"{key_prefix}_est")
-            
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Estandar (scc/min)", "-", Caja(st.session_state.get(f"{key_prefix}_est")), ""], pesos_flujo)
-            
-            val_vol_pdf = f"{desv*100:.2f}%" if val else ""
-            res_pdf = _res(resultado_cumple) if val else ""
-            
-            tabla_pdf(S_FLU, titulo, None, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val),
-                                            val_vol_pdf], pesos_flujo)
-            return val
 
-        flujo_vol_verif = render_tabla_flujo_gases("Verificación", "verif")
-        req_ajuste_final = "SÍ" if (flujo_vol_verif and abs(flujo_vol_verif - flujo_ideal_vol)/flujo_ideal_vol > flujo_tol) else "No"
-        st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
-        nota_pdf(S_FLU, f"¿Requiere ajuste volumétrico?: {req_ajuste_final}")
-        
-        if req_ajuste_final == "SÍ":
-            render_tabla_flujo_gases("Ajuste", "ajus")
+            tabla_pdf(S_FLU, titulo, enc_flujo, ["Flujo Estandar (scc/min)", "-", Caja(val_est), "", ""], pesos_flujo)
+            tabla_pdf(S_FLU, titulo, enc_flujo, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val), desv_txt, _res(resultado_cumple)], pesos_flujo)
+            return val, resultado_cumple
+
+        st.caption(f"Tolerancia del flujo volumétrico: ± {flujo_tol * 100:g}% respecto a {flujo_ideal_vol} cc/min.")
+        _, cumple_verif_gas = render_tabla_flujo_gases("Verificación", "verif")
+        if cumple_verif_gas is None:
+            st.info("Captura el flujo volumétrico para saber si se requiere ajuste.")
+        else:
+            req_ajuste_final = "No" if cumple_verif_gas else "SÍ"
+            st.markdown(f"#### ¿Requiere ajuste volumétrico?: **{req_ajuste_final}**")
+            nota_pdf(S_FLU, f"¿Requiere ajuste volumétrico?: {req_ajuste_final}")
+
+        # El ajuste solo se muestra (y solo llega al PDF) cuando la verificación no cumple
+        if cumple_verif_gas is False:
+            _, cumple_ajuste_gas = render_tabla_flujo_gases("Ajuste", "ajus")
+            if cumple_ajuste_gas is not None:
+                nota_pdf(S_FLU, f"Resultado final del flujo: {'Cumple' if cumple_ajuste_gas else 'NO CUMPLE'} (después del ajuste)")
 
 # ==========================================
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
@@ -827,7 +1024,7 @@ def bloque_revision_detallada():
             renderizar_fotos_seccion(S_DET, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
             
-        c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
+        c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3])
         with c1: st.write("**Componente**")
         with c2: st.write("**Estado**")
         with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
@@ -862,7 +1059,7 @@ def bloque_revision_detallada():
 with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
     pdf_ctx["sec"], pdf_ctx["sub"] = S_LIM, ""
     if es_gas:
-        c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 3])
+        c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3])
         with c1: st.write("**Componente**")
         with c2: st.write("**Estado**")
         with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
@@ -934,7 +1131,7 @@ if es_gas:
             st.markdown("**Certificación**")
             st.text_input("Laboratorio", value=lab_cal2_def, key="lab_calib2")
             st.text_input("Técnico", value=tec_cal2_def, key="tec_calib2")
-            st.date_input("Fecha de calibración/certificado", datetime.date(2026, 8, 8), key="vig_calib2")
+            st.date_input("Fecha de calibración/certificado", fecha_cal2_def, key="vig_calib2")
         for etiqueta, k, grupo in [("Fabricante", "fab_calib2", ""), ("Modelo", "mod_calib2", ""), ("N/S Calibrador de Gases", "ns_calib2", ""),
                                    ("Laboratorio", "lab_calib2", "Certificación"), ("Técnico", "tec_calib2", "Certificación"),
                                    ("Fecha de calibración/certificado", "vig_calib2", "Certificación")]:
@@ -951,20 +1148,20 @@ if es_gas:
             if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"]:
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1: st.write("Ganancia")
-                with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed")
-                with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed")
+                with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed", value=None)
+                with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed", value=None)
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1: st.write("Zero Offset (ppb/ppm)")
-                with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed")
-                with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed")
+                with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed", value=None)
+                with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed", value=None)
                 for param, kp in [("Ganancia", "cs_g_"), ("Zero Offset (ppb/ppm)", "cs_z_")]:
                     tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
             else:
                 for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset NO", "cs_zno_"), ("Zero Offset NO2", "cs_zno2_")]:
                     c1, c2, c3 = st.columns([2, 1, 1])
                     with c1: st.write(param)
-                    with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed")
-                    with c3: st.number_input("fin", key=f"{kp}f", label_visibility="collapsed")
+                    with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed", value=None)
+                    with c3: st.number_input("fin", key=f"{kp}f", label_visibility="collapsed", value=None)
                     tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
 
         with col_cs_der:
@@ -972,7 +1169,7 @@ if es_gas:
             for gas, kp in [("Cero", "tr_c"), ("Span", "tr_s")]:
                 c1, c2, c3 = st.columns([1, 2, 1])
                 with c1: st.write(gas)
-                with c2: st.number_input("val", key=kp, label_visibility="collapsed")
+                with c2: st.number_input("val", key=kp, label_visibility="collapsed", value=None)
                 with c3: st.write("min")
                 tabla_pdf(S_CS, "Tiempo de respuesta al suministrar gas", None, [gas, Caja(st.session_state.get(kp)), "min"], [1, 2, 1])
 
@@ -984,7 +1181,7 @@ if es_gas:
             c1, c2, c3 = st.columns(3)
             val_cg_ideal = 0.0
             with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True, key="vcg")
-            with c2: resp_c = st.number_input("Resp Cero", value=0.000, format="%.4f", key="rac")
+            with c2: resp_c = st.number_input("Resp Cero", value=None, format="%.4f", key="rac")
             with c3:
                 if resp_c is not None:
                     dif_c = resp_c - val_cg
@@ -995,7 +1192,7 @@ if es_gas:
             st.markdown("#### Concentración Span")
             c1, c2, c3 = st.columns(3)
             with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True, key="vsg")
-            with c2: resp_s = st.number_input("Resp Span", value=0.000, format="%.4f", key="ras")
+            with c2: resp_s = st.number_input("Resp Span", value=None, format="%.4f", key="ras")
             with c3:
                 if resp_s is not None and val_sg != 0:
                     desv_s = (resp_s - val_sg) / val_sg
@@ -1106,12 +1303,9 @@ if es_gas:
                                   height=350, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
 
-            try:
-                img_bytes = fig.to_image(format="png", width=800, height=400)
-                _sec(S_MUL)["fotos"].append((img_bytes, "Gráfica de Regresión Lineal (Calculada)"))
-            except Exception as e:
-                pass 
-                
+            # La gráfica del PDF se dibuja con reportlab a partir de los mismos datos (no depende de kaleido ni de un navegador)
+            _sec(S_MUL)["regresion"] = {"x": list(x_vals), "y": list(y_vals), "m": float(m), "b": float(b)}
+
         if es_externo:
             st.divider()
             renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
@@ -1125,20 +1319,20 @@ if not es_externo:
 # ==========================================
 with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
     st.markdown("**Observaciones Generales**")
-    obs_gen = st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs")
+    obs_gen = st.text_area("Obs Gen", placeholder="Mencionar anomalías...", label_visibility="collapsed", key="res_obs", height="content")
     st.markdown("**Conclusiones**")
-    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar conclusiones...", label_visibility="collapsed", key="res_conc")
+    conclusiones = st.text_area("Conclusiones", placeholder="Mencionar conclusiones...", label_visibility="collapsed", key="res_conc", height="content")
 
     st.write("<br>", unsafe_allow_html=True)
-    
+
     c1, c2, c3 = st.columns(3, gap="large")
     with c1:
         st.markdown("<div class='header-firma'>Técnico / Operador</div>", unsafe_allow_html=True)
-        st.text_input("Empresa/Ins", value=tec_empresa_def, key="e_tec")
+        st.text_input(etq_empresa_tec, value=tec_empresa_def, key="e_tec")
         st.text_input("Nombre", value=tec_nombre_def, key="n_tec")
         st.date_input("Fecha", datetime.date.today(), key="f_tec")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
-        
+
     with c2:
         st.markdown("<div class='header-firma'>Supervisado / Revisado por</div>", unsafe_allow_html=True)
         st.text_input("Institución", value="SEMADET", disabled=es_externo, key="e_sup")
@@ -1158,42 +1352,55 @@ st.divider()
 # ==========================================
 # ENVÍO DE DATOS A GOOGLE DRIVE Y PDF
 # ==========================================
-def generar_pdf():
+def preparar_resumen():
+    """Agrega a pdf_secciones el resumen y las firmas con los valores capturados en esta ejecución."""
     pdf_secciones.pop(S_RES, None)
     _sec(S_RES)["firmas"] = True
     _sec(S_RES)["textos"] = [("Observaciones Generales", st.session_state.get("res_obs"), "Mencionar anomalías..."),
                              ("Conclusiones", st.session_state.get("res_conc"), "Mencionar conclusiones...")]
-    
-    for grupo, campos in [("Técnico / Operador", [("Empresa/Ins", "e_tec"), ("Nombre", "n_tec"), ("Fecha", "f_tec")]),
+
+    for grupo, campos in [("Técnico / Operador", [(etq_empresa_tec, "e_tec"), ("Nombre", "n_tec"), ("Fecha", "f_tec")]),
                           ("Supervisado / Revisado por", [("Institución", "e_sup"), ("Nombre", "n_sup"), ("Fecha", "f_sup")]),
                           ("Supervisor SEMADET", [("Cargo", "c_sema"), ("Nombre", "n_sema"), ("Fecha", "f_sema")])]:
         for etiqueta, k in campos: kv(S_RES, etiqueta, st.session_state.get(k), grupo)
 
-    titulo = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
-    subtitulo = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
-    logo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png")
-    return construir_pdf(titulo, subtitulo, [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones], logo)
+preparar_resumen()
+# Fotografía de los datos de esta ejecución: el PDF descargado y el enviado se construyen con exactamente lo mismo
+_titulo_pdf = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
+_subtitulo_pdf = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
+_logo_pdf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png")
+_secciones_pdf = [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones]
+
+def generar_pdf():
+    return construir_pdf(_titulo_pdf, _subtitulo_pdf, _secciones_pdf, _logo_pdf)
+
+def _segmento_archivo(texto, vacio):
+    """Parte del nombre sin caracteres no válidos en Windows, Drive o adjuntos de correo."""
+    limpio = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", str(texto)).strip(" .-")
+    return limpio or vacio
 
 def nombre_base_archivo():
     estaciones_abrev = {
-        "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN", 
-        "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM", 
-        "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN", 
+        "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN",
+        "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM",
+        "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN",
         "Tlaquepaque": "TLA"
     }
     est_cod = estaciones_abrev.get(estacion_sel, "XXX")
-    
+
     if es_gas: gas_cod = {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", "Monóxido de Carbono (CO)": "CO", "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, "")
     else:
         marca_pm = "BAM" if es_bam else "Thermo"
         gas_cod = f"{pm_tipo}_{marca_pm}"
-        
-    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{num_serie_val}_{origen_archivo}"
+
+    # estaciones sin número de serie registrado: se marca en lugar de dejar un segmento vacío ("__")
+    serie = _segmento_archivo(num_serie_val, "SIN-NS")
+    return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{serie}_{origen_archivo}"
 
 def nombre_pdf(): return f"{nombre_base_archivo()}.pdf"
 
 col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
-mensajes = st.columns(3)[2].container()  
+mensajes = st.columns(3)[2].container()
 
 with col_imprimir:
     components.html(
@@ -1209,12 +1416,14 @@ with col_imprimir:
 
 with col_pdf:
     sin_estacion = estacion_sel == "Selecciona una opción..."
-    st.download_button("📄 Descargar PDF del formato", data=b"" if sin_estacion else generar_pdf(), file_name=nombre_pdf(),
-                       mime="application/pdf", use_container_width=True, disabled=sin_estacion,
+    # El PDF se construye al pulsar el botón (no en cada cambio del formulario) con los datos de esta ejecución
+    st.download_button("📄 Descargar PDF del formato", data=b"" if sin_estacion else generar_pdf, file_name=nombre_pdf(),
+                       mime="application/pdf", use_container_width=True, disabled=sin_estacion, on_click="ignore",
                        help="Selecciona la Estación para habilitar la descarga" if sin_estacion else None)
 
 def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
     media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
+    # create siempre agrega un archivo nuevo: los reportes anteriores con el mismo nombre se conservan
     return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute()
 
 def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
@@ -1229,15 +1438,13 @@ def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
 
 with col_drive:
     if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True):
-        try:
-            faltan = [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-        except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
-            faltan = SECRETS_REQUERIDOS
+        faltan = secrets_faltantes()
         if sin_estacion:
             mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
         elif faltan:
             mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
         else:
+            # un solo PDF para Drive y para el correo: ambos reciben exactamente los mismos bytes y el mismo nombre
             pdf_bytes, nombre_del_pdf = generar_pdf(), nombre_pdf()
             enlace = ""
             with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
@@ -1247,7 +1454,7 @@ with col_drive:
                     enlace = pdf_subido.get("webViewLink", "")
                     st.success(f"✅ PDF guardado en Drive como: {nombre_del_pdf}")
                 except Exception as e:
-                    st.error(f"❌ No se pudo guardar en Drive: {type(e).__name__}: {e}")
+                    st.error(f"❌ No se pudo guardar en Drive: {error_google(e)}")
             with mensajes, st.spinner("Enviando el PDF al coordinador..."):
                 try:
                     servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
@@ -1261,4 +1468,4 @@ with col_drive:
                                   [(nombre_del_pdf, pdf_bytes, "application/pdf")])
                     st.success("✅ Correo enviado al coordinador.")
                 except Exception as e:
-                    st.error(f"❌ No se pudo enviar el correo: {type(e).__name__}: {e}")
+                    st.error(f"❌ No se pudo enviar el correo: {error_google(e)}")
