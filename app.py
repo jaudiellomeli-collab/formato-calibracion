@@ -9,6 +9,7 @@ import base64
 import json
 import re
 import hashlib
+import time
 from PIL import Image, ImageOps
 import streamlit.components.v1 as components
 from email.message import EmailMessage
@@ -242,7 +243,7 @@ def guardar_fotos(servicio, carpeta_b, correo, previas):
     Conserva las ya guardadas (también las del borrador anterior aunque no se haya pulsado Cargar), actualiza sus
     descripciones y manda a la papelera de Drive solo las que se quitaron con el botón Quitar."""
     quitadas = set(st.session_state.get("_fotos_quitadas", []))
-    resultado = {}
+    resultado, invalidas = {}, []
     for fuente in (previas or {}, st.session_state.get("_fotos_guardadas", {})):
         for prefijo, lista in fuente.items():
             destino = resultado.setdefault(prefijo, [])
@@ -258,7 +259,8 @@ def guardar_fotos(servicio, carpeta_b, correo, previas):
         try:
             datos = procesar_foto(foto.getvalue())
         except Exception:
-            continue  # archivo que no es imagen: ya se avisó al subirlo
+            invalidas.append(foto.name)
+            continue
         sha = hashlib.sha1(datos).hexdigest()
         lista = resultado.setdefault(prefijo, [])
         if any(f.get("sha") == sha for f in lista): continue  # la misma foto no se sube dos veces
@@ -273,7 +275,39 @@ def guardar_fotos(servicio, carpeta_b, correo, previas):
     for archivo_id in quitadas:  # la papelera de Drive las conserva 30 días
         try: servicio.files().update(fileId=archivo_id, body={"trashed": True}).execute(num_retries=3)
         except Exception: pass
-    return {p: l for p, l in resultado.items() if l}
+    return {p: l for p, l in resultado.items() if l}, invalidas
+
+def hay_cambios_en_fotos():
+    """True si hay fotos nuevas, quitadas o descripciones editadas que aún no están guardadas en el borrador."""
+    if fotos_en_uploaders() or st.session_state.get("_fotos_quitadas"):
+        return True
+    for prefijo, lista in st.session_state.get("_fotos_guardadas", {}).items():
+        for f in lista:
+            clave = f"desc_fot_g_{prefijo}_{f['id']}"
+            if clave in st.session_state and st.session_state[clave] != f.get("desc", ""):
+                return True
+    return False
+
+def guardar_borrador(correo, vista):
+    """Guarda en Drive el formulario y sus fotos para la vista actual. Devuelve (fotos guardadas, imágenes inválidas)."""
+    servicio = build("drive", "v3", credentials=credenciales_google())
+    nombre_borrador = f"borrador_{correo}.json"
+    archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], nombre_borrador)
+    vista_previa = dict_global.get(vista)
+    previas = vista_previa.get("fotos", {}) if isinstance(vista_previa, dict) and "__version__" in vista_previa else {}
+    fotos, invalidas = guardar_fotos(servicio, carpeta_b, correo, previas)
+    dict_global[vista] = {**datos_para_borrador(), "fotos": fotos}
+    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
+    if archivo_id:
+        servicio.files().update(fileId=archivo_id, media_body=media).execute(num_retries=3)
+    else:
+        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta_b]}, media_body=media).execute(num_retries=3)
+    reiniciar_fotos(fotos)  # lo subido pasa a la galería de fotos guardadas
+    return fotos, invalidas
+
+def avisar_invalidas(invalidas):
+    for nombre in invalidas:
+        st.sidebar.warning(f"«{nombre}» no es una imagen válida y no se guardó.")
 
 def quitar_foto(prefijo, archivo_id):
     guardadas = st.session_state.get("_fotos_guardadas", {})
@@ -304,20 +338,8 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
     else:
         try:
             with st.spinner("Guardando vista actual..."):
-                servicio = build("drive", "v3", credentials=credenciales_google())
-                carpeta = st.secrets["drive_carpeta_id"]
-                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, carpeta, nombre_borrador)
-                vista_previa = dict_global.get(vista_actual)
-                previas = vista_previa.get("fotos", {}) if isinstance(vista_previa, dict) and "__version__" in vista_previa else {}
-                fotos_guardadas = guardar_fotos(servicio, carpeta_b, correo_borrador.strip(), previas)
-                dict_global[vista_actual] = {**datos_para_borrador(), "fotos": fotos_guardadas}
-                media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
-                if archivo_id:
-                    servicio.files().update(fileId=archivo_id, media_body=media).execute(num_retries=3)
-                else:
-                    servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta_b]}, media_body=media).execute(num_retries=3)
-            reiniciar_fotos(fotos_guardadas)  # lo subido pasa a la galería de fotos guardadas
+                fotos_guardadas, invalidas = guardar_borrador(correo_borrador.strip(), vista_actual)
+            avisar_invalidas(invalidas)
             total_fotos = sum(len(l) for l in fotos_guardadas.values())
             st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}" + (f", con {total_fotos} foto(s)." if total_fotos else "."))
         except Exception as e:
@@ -348,6 +370,19 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
                 st.rerun()
             else:
                 st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
+
+# Guardado automático: al subir, quitar o describir una foto se guarda el borrador (con sus fotos) sin pulsar Guardar,
+# para que no se pierdan si se recarga la página o se cierra la sesión. Tras un error espera un minuto antes de reintentar.
+puede_autoguardar = bool((correo_borrador or "").strip()) and v_est != "Selecciona una opción..." and not secrets_faltantes()
+if puede_autoguardar and time.time() - st.session_state.get("_fallo_autoguardado", 0) > 60 and hay_cambios_en_fotos():
+    try:
+        with st.spinner("Guardando fotos en tu borrador..."):
+            fotos_auto, invalidas = guardar_borrador(correo_borrador.strip(), vista_actual)
+        avisar_invalidas(invalidas)
+        st.toast(f"📷 Fotos guardadas en tu borrador ({sum(len(l) for l in fotos_auto.values())}).")
+    except Exception as e:
+        st.session_state["_fallo_autoguardado"] = time.time()
+        st.sidebar.warning(f"No se pudieron guardar las fotos automáticamente ({error_google(e)}). Pulsa 📥 Guardar para intentarlo de nuevo.")
 
 # ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
@@ -572,6 +607,9 @@ def fila_simple(nombre, key, ph="No se realizó"):
 def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc_default=""):
     """Dibuja el uploader de imágenes e incrusta las fotos directamente en la sección del PDF."""
     st.markdown(f"**{titulo}**")
+    if not (st.session_state.get("correo_borrador") or "").strip():
+        st.warning("Escribe tu correo en «💾 Progreso en la Nube» (panel lateral) para que las fotos se guarden solas. "
+                   "Sin correo se pierden si se recarga la página.")
     guardadas = st.session_state.get("_fotos_guardadas", {}).get(key_prefix, [])
     if guardadas:
         st.caption(f"Fotos guardadas en tu borrador ({len(guardadas)}). Se incluyen en el reporte; puedes editar su descripción o quitarlas.")
@@ -1025,18 +1063,7 @@ if es_particulas:
             # BAM-1020 (manual Met One, 3.4.7 "Span Membrane" y 6.9 "Zero Filter Background Test"):
             # se compara la masa medida de la membrana span contra su valor de fábrica; criterio < ±5 %.
             ERROR_SPAN_MAX = 5.0
-            st.markdown("#### Ingreso de datos de la Membrana Span")
-            col_cm1, col_cm2 = st.columns(2)
-            with col_cm1:
-                st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
-                st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
-                st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
-            with col_cm2:
-                background = st.number_input("Background (mg/m³)", value=0.0, format="%.4f", step=0.0001, key="cm_bkg")
-                span_esperado = st.number_input("Expected Span Membrane (mg/cm²)", value=0.8, format="%.4f", step=0.0001, key="cm_span_esp",
-                                                help="Valor de la membrana span del certificado de fábrica del BAM (usualmente cerca de 0.800).")
-
-            st.markdown("---")
+            st.markdown("#### Membrana Span")
             pesos_mas = [1.2, 1, 1.4]
             c1, c2, c3 = st.columns(pesos_mas)
             with c1: st.write("**Lectura**")
@@ -1056,7 +1083,10 @@ if es_particulas:
 
             c1, c2, c3 = st.columns(pesos_mas)
             with c1: st.write("Measured Mass (mg/cm²)")
-            with c2: st.write(f"{span_esperado:.4f}" if span_esperado is not None else "-")
+            # el valor ideal es la masa de la membrana span de fábrica (certificado del BAM, usualmente 0.800)
+            with c2: span_esperado = st.number_input("Expected Span Membrane (mg/cm²)", value=0.8, format="%.4f", step=0.0001, key="cm_span_esp",
+                                                     label_visibility="collapsed",
+                                                     help="Expected Span Membrane del certificado de fábrica del BAM (usualmente cerca de 0.800).")
             with c3: masa_medida = st.number_input("Measured Mass (mg/cm²)", value=None, format="%.4f", step=0.0001, key="cm_masa_med",
                                                    label_visibility="collapsed")
 
@@ -1074,10 +1104,6 @@ if es_particulas:
                 else: st.error(f"{error_span:.2f}% — NO CUMPLE ❌")
 
             def _cuatro(v): return f"{v:.4f}" if v is not None else None
-            for etiqueta, valor in [("Equipo de calibración (foils)", st.session_state.get("cm_eq")), ("Reference No. / Certificado", st.session_state.get("cm_ref")),
-                                    ("Fecha de certificación de foils", st.session_state.get("cm_fecha")), ("Background (mg/m³)", _cuatro(background)),
-                                    ("Expected Span Membrane (mg/cm²)", _cuatro(span_esperado))]:
-                kv(S_MAS, etiqueta, valor)
             enc_masas = ["Lectura", "Valor Ideal", "Lectura del equipo"]
             tabla_pdf(S_MAS, "", enc_masas, ["Zero Count (I1)", "N/A", Caja(i1)], pesos_mas)
             tabla_pdf(S_MAS, "", enc_masas, ["Span Count (I2)", "N/A", Caja(i2)], pesos_mas)
