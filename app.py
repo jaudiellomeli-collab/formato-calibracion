@@ -8,6 +8,8 @@ import os
 import base64
 import json
 import re
+import hashlib
+import time
 from PIL import Image, ImageOps
 import streamlit.components.v1 as components
 from email.message import EmailMessage
@@ -103,7 +105,7 @@ def error_google(e):
 # ==========================================
 CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
 CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
-PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_")  # las fotos y sus descripciones no se guardan en el borrador
+PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_", "quitar_")  # las fotos y sus descripciones se guardan aparte, en "fotos"
 VERSION_BORRADOR = 2
 # Opciones de versiones anteriores del formato que cambiaron de texto
 MIGRAR_OPCIONES = {"Sí 🟢": "Sí", "No 🔴": "No", "Bueno 🟢": "Bueno", "Malo 🔴": "Malo"}
@@ -149,6 +151,7 @@ def limpiar_formulario():
     for k in list(st.session_state.keys()):
         if k not in conservar and not k.startswith("_"):
             del st.session_state[k]
+    reiniciar_fotos({})
 
 CARPETA_BORRADORES = "Borradores"
 TIPO_CARPETA = "application/vnd.google-apps.folder"
@@ -162,27 +165,160 @@ def carpeta_drive(servicio, raiz, ruta):
     padre = raiz
     for nombre in ruta:
         res = servicio.files().list(q=f"name='{_q(nombre)}' and '{padre}' in parents and mimeType='{TIPO_CARPETA}' and trashed=false",
-                                    fields="files(id)").execute().get("files", [])
+                                    fields="files(id)").execute(num_retries=3).get("files", [])
         padre = res[0]["id"] if res else servicio.files().create(body={"name": nombre, "mimeType": TIPO_CARPETA, "parents": [padre]},
-                                                                  fields="id").execute()["id"]
+                                                                  fields="id").execute(num_retries=3)["id"]
     return padre
 
 def buscar_borrador(servicio, raiz, nombre):
     """Busca el borrador en la carpeta Borradores y, por compatibilidad, en la carpeta principal (donde se guardaban antes)."""
     carpeta_b = carpeta_drive(servicio, raiz, [CARPETA_BORRADORES])
     res = servicio.files().list(q=f"name='{_q(nombre)}' and ('{carpeta_b}' in parents or '{raiz}' in parents) and trashed=false",
-                                fields="files(id)").execute()
+                                fields="files(id)").execute(num_retries=3)
     archivos = res.get('files', [])
     if not archivos: return None, {}, carpeta_b
     archivo_id = archivos[0]['id']
-    contenido = servicio.files().get_media(fileId=archivo_id).execute()
+    contenido = servicio.files().get_media(fileId=archivo_id).execute(num_retries=3)
     return archivo_id, json.loads(contenido.decode('utf-8')), carpeta_b
+
+# ==========================================
+# FOTOS GUARDADAS CON EL BORRADOR (Drive: <carpeta principal>/Borradores/Fotos)
+# ==========================================
+CARPETA_FOTOS = "Fotos"
+
+LADO_FOTO = 600  # px de la miniatura cuadrada: suficiente para ver detalles en el PDF sin hacerlo pesado
+
+@st.cache_data(max_entries=200, show_spinner=False)
+def procesar_foto(datos):
+    """Valida la imagen, corrige la orientación EXIF y devuelve una miniatura JPEG cuadrada: la foto completa
+    centrada sobre fondo blanco, sin deformarla ni recortarla. Lanza una excepción si el archivo no es una imagen válida."""
+    with Image.open(io.BytesIO(datos)) as img:
+        img.verify()  # detecta archivos dañados o que no son imagen
+    with Image.open(io.BytesIO(datos)) as img:
+        img.draft("RGB", (LADO_FOTO * 2, LADO_FOTO * 2))  # JPEG grandes: decodifica a menor resolución y ahorra memoria
+        img = ImageOps.exif_transpose(img)
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            fondo = Image.new("RGB", img.size, "white")
+            fondo.paste(img, mask=img.getchannel("A"))
+            img = fondo
+        img = img.convert("RGB")
+        img.thumbnail((LADO_FOTO, LADO_FOTO), Image.Resampling.LANCZOS)
+        cuadro = ImageOps.pad(img, (LADO_FOTO, LADO_FOTO), color="white")
+    buf = io.BytesIO()
+    cuadro.save(buf, "JPEG", quality=72, optimize=True)
+    return buf.getvalue()
+
+@st.cache_data(max_entries=300, show_spinner=False)
+def descargar_foto(archivo_id):
+    """Bytes JPEG de una foto guardada en Drive (se descarga una sola vez y queda en caché)."""
+    return build("drive", "v3", credentials=credenciales_google()).files().get_media(fileId=archivo_id).execute(num_retries=3)
+
+def reiniciar_fotos(guardadas):
+    """Deja como fotos guardadas las indicadas y vacía los selectores de archivos (cambiándoles la clave) para no duplicarlas."""
+    st.session_state["_fotos_guardadas"] = guardadas
+    st.session_state["_fotos_quitadas"] = []
+    st.session_state["_ver_fotos"] = st.session_state.get("_ver_fotos", 0) + 1
+    for k in [k for k in st.session_state.keys() if k.startswith("desc_fot_g_")]:
+        del st.session_state[k]
+
+def clave_uploader(prefijo):
+    return f"up_{prefijo}__{st.session_state.get('_ver_fotos', 0)}"
+
+def fotos_en_uploaders():
+    """[(sección, archivo, descripción)] de las fotos que están en los selectores de archivos en este momento."""
+    sufijo = f"__{st.session_state.get('_ver_fotos', 0)}"
+    salida = []
+    for k in list(st.session_state.keys()):
+        if not (k.startswith("up_") and k.endswith(sufijo)) or not st.session_state[k]: continue
+        prefijo = k[3:-len(sufijo)]
+        valor = st.session_state[k]
+        for foto in (valor if isinstance(valor, list) else [valor]):
+            ident = getattr(foto, "file_id", None) or f"{foto.name}_{foto.size}"
+            salida.append((prefijo, foto, st.session_state.get(f"desc_fot_{prefijo}_{ident}") or ""))
+    return salida
+
+def guardar_fotos(servicio, carpeta_b, correo, previas):
+    """Sube a Drive las fotos nuevas y devuelve {sección: [{"id", "sha", "desc"}]} para el borrador.
+    Conserva las ya guardadas (también las del borrador anterior aunque no se haya pulsado Cargar), actualiza sus
+    descripciones y manda a la papelera de Drive solo las que se quitaron con el botón Quitar."""
+    quitadas = set(st.session_state.get("_fotos_quitadas", []))
+    resultado, invalidas = {}, []
+    for fuente in (previas or {}, st.session_state.get("_fotos_guardadas", {})):
+        for prefijo, lista in fuente.items():
+            destino = resultado.setdefault(prefijo, [])
+            for f in lista:
+                if f["id"] not in quitadas and not any(g["id"] == f["id"] for g in destino):
+                    destino.append(dict(f))
+    for prefijo, lista in resultado.items():
+        for f in lista:
+            f["desc"] = st.session_state.get(f"desc_fot_g_{prefijo}_{f['id']}", f.get("desc", ""))
+    nuevas = fotos_en_uploaders()
+    carpeta_f = carpeta_drive(servicio, carpeta_b, [CARPETA_FOTOS]) if nuevas else None
+    for prefijo, foto, desc in nuevas:
+        try:
+            datos = procesar_foto(foto.getvalue())
+        except Exception:
+            invalidas.append(foto.name)
+            continue
+        sha = hashlib.sha1(datos).hexdigest()
+        lista = resultado.setdefault(prefijo, [])
+        if any(f.get("sha") == sha for f in lista): continue  # la misma foto no se sube dos veces
+        nombre = f"{re.sub(r'[^0-9A-Za-z.@_-]', '_', correo)}_{prefijo}_{sha[:12]}.jpg"
+        # si un guardado anterior falló a medias, la foto ya puede estar en Drive: se reutiliza en vez de duplicarla
+        existente = servicio.files().list(q=f"name='{_q(nombre)}' and '{carpeta_f}' in parents and trashed=false",
+                                          fields="files(id)").execute(num_retries=3).get("files", [])
+        archivo = existente[0] if existente else servicio.files().create(
+            body={"name": nombre, "parents": [carpeta_f]}, media_body=MediaIoBaseUpload(io.BytesIO(datos), mimetype="image/jpeg"),
+            fields="id").execute(num_retries=3)
+        lista.append({"id": archivo["id"], "sha": sha, "desc": desc})
+    for archivo_id in quitadas:  # la papelera de Drive las conserva 30 días
+        try: servicio.files().update(fileId=archivo_id, body={"trashed": True}).execute(num_retries=3)
+        except Exception: pass
+    return {p: l for p, l in resultado.items() if l}, invalidas
+
+def hay_cambios_en_fotos():
+    """True si hay fotos nuevas, quitadas o descripciones editadas que aún no están guardadas en el borrador."""
+    if fotos_en_uploaders() or st.session_state.get("_fotos_quitadas"):
+        return True
+    for prefijo, lista in st.session_state.get("_fotos_guardadas", {}).items():
+        for f in lista:
+            clave = f"desc_fot_g_{prefijo}_{f['id']}"
+            if clave in st.session_state and st.session_state[clave] != f.get("desc", ""):
+                return True
+    return False
+
+def guardar_borrador(correo, vista):
+    """Guarda en Drive el formulario y sus fotos para la vista actual. Devuelve (fotos guardadas, imágenes inválidas)."""
+    servicio = build("drive", "v3", credentials=credenciales_google())
+    nombre_borrador = f"borrador_{correo}.json"
+    archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], nombre_borrador)
+    vista_previa = dict_global.get(vista)
+    previas = vista_previa.get("fotos", {}) if isinstance(vista_previa, dict) and "__version__" in vista_previa else {}
+    fotos, invalidas = guardar_fotos(servicio, carpeta_b, correo, previas)
+    dict_global[vista] = {**datos_para_borrador(), "fotos": fotos}
+    media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
+    if archivo_id:
+        servicio.files().update(fileId=archivo_id, media_body=media).execute(num_retries=3)
+    else:
+        servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta_b]}, media_body=media).execute(num_retries=3)
+    reiniciar_fotos(fotos)  # lo subido pasa a la galería de fotos guardadas
+    return fotos, invalidas
+
+def avisar_invalidas(invalidas):
+    for nombre in invalidas:
+        st.sidebar.warning(f"«{nombre}» no es una imagen válida y no se guardó.")
+
+def quitar_foto(prefijo, archivo_id):
+    guardadas = st.session_state.get("_fotos_guardadas", {})
+    guardadas[prefijo] = [f for f in guardadas.get(prefijo, []) if f["id"] != archivo_id]
+    st.session_state.setdefault("_fotos_quitadas", []).append(archivo_id)
 
 # ==========================================
 # PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
 # ==========================================
 st.sidebar.markdown("### 💾 Progreso en la Nube")
-st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**(Nota: Las fotos y sus descripciones no se guardan en el borrador, súbelas al final en la computadora).**")
+st.sidebar.caption("¿Empezaste en el celular? Ingresa tu correo, guarda tu avance, y cárgalo en tu computadora para continuar.\n**Las fotos y sus descripciones también se guardan.**")
 correo_borrador = st.sidebar.text_input("Tu Correo Electrónico:", key="correo_borrador", placeholder="tecnico@jalisco.gob.mx")
 
 v_tipo = st.session_state.get('k_tipo', 'Selecciona una opción...')
@@ -202,17 +338,10 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
     else:
         try:
             with st.spinner("Guardando vista actual..."):
-                servicio = build("drive", "v3", credentials=credenciales_google())
-                carpeta = st.secrets["drive_carpeta_id"]
-                nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, carpeta, nombre_borrador)
-                dict_global[vista_actual] = datos_para_borrador()
-                media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
-                if archivo_id:
-                    servicio.files().update(fileId=archivo_id, media_body=media).execute()
-                else:
-                    servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta_b]}, media_body=media).execute()
-            st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}.")
+                fotos_guardadas, invalidas = guardar_borrador(correo_borrador.strip(), vista_actual)
+            avisar_invalidas(invalidas)
+            total_fotos = sum(len(l) for l in fotos_guardadas.values())
+            st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}" + (f", con {total_fotos} foto(s)." if total_fotos else "."))
         except Exception as e:
             st.sidebar.error(f"Error al guardar: {error_google(e)}")
 
@@ -235,10 +364,25 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
             if not archivo_id:
                 st.sidebar.warning("No se encontró ningún borrador para este correo.")
             elif vista_actual in dict_global:
-                restaurar_borrador(dict_global[vista_actual])
+                vista = dict_global[vista_actual]
+                restaurar_borrador(vista)
+                reiniciar_fotos(vista.get("fotos", {}) if "__version__" in vista else {})
                 st.rerun()
             else:
                 st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
+
+# Guardado automático: al subir, quitar o describir una foto se guarda el borrador (con sus fotos) sin pulsar Guardar,
+# para que no se pierdan si se recarga la página o se cierra la sesión. Tras un error espera un minuto antes de reintentar.
+puede_autoguardar = bool((correo_borrador or "").strip()) and v_est != "Selecciona una opción..." and not secrets_faltantes()
+if puede_autoguardar and time.time() - st.session_state.get("_fallo_autoguardado", 0) > 60 and hay_cambios_en_fotos():
+    try:
+        with st.spinner("Guardando fotos en tu borrador..."):
+            fotos_auto, invalidas = guardar_borrador(correo_borrador.strip(), vista_actual)
+        avisar_invalidas(invalidas)
+        st.toast(f"📷 Fotos guardadas en tu borrador ({sum(len(l) for l in fotos_auto.values())}).")
+    except Exception as e:
+        st.session_state["_fallo_autoguardado"] = time.time()
+        st.sidebar.warning(f"No se pudieron guardar las fotos automáticamente ({error_google(e)}). Pulsa 📥 Guardar para intentarlo de nuevo.")
 
 # ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
@@ -425,10 +569,9 @@ def fila_libre(param, unit, ideal_str, key):
     with c2: st.write(unit)
     with c3: st.write(ideal_str)
     with c4: v_ini = st.text_input("ini", key=f"ini_{key}", label_visibility="collapsed")
-    with c5: c_ini = st.text_area("c_ini", key=f"c_ini_{key}", label_visibility="collapsed", height="content")
     with c6: v_fin = st.text_input("fin", key=f"fin_{key}", label_visibility="collapsed")
-    with c7: c_fin = st.text_area("c_fin", key=f"c_fin_{key}", label_visibility="collapsed", height="content")
-    tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(v_ini), Caja(c_ini), Caja(v_fin), Caja(c_fin)], PESOS_PG)
+    # sin rango ideal no hay Cumple / NO CUMPLE: la columna de comentarios queda vacía
+    tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(v_ini), "", Caja(v_fin), ""], PESOS_PG)
     return None, None
 
 # Estado / limpieza / reemplazo: el valor guardado es el texto; el ícono solo se agrega al mostrarlo.
@@ -461,33 +604,31 @@ def fila_simple(nombre, key, ph="No se realizó"):
     with c2: obs = st.text_area("obs", key=key, label_visibility="collapsed", placeholder=ph, height="content")
     tabla_pdf(pdf_ctx["sec"], pdf_ctx["sub"], None, [nombre, Caja(obs, ph)], [1, 2], barra=True)
 
-LADO_FOTO = 600  # px de la miniatura cuadrada: suficiente para ver detalles en el PDF sin hacerlo pesado
-
-@st.cache_data(max_entries=200, show_spinner=False)
-def procesar_foto(datos):
-    """Valida la imagen, corrige la orientación EXIF y devuelve una miniatura JPEG cuadrada: la foto completa
-    centrada sobre fondo blanco, sin deformarla ni recortarla. Lanza una excepción si el archivo no es una imagen válida."""
-    with Image.open(io.BytesIO(datos)) as img:
-        img.verify()  # detecta archivos dañados o que no son imagen
-    with Image.open(io.BytesIO(datos)) as img:
-        img.draft("RGB", (LADO_FOTO * 2, LADO_FOTO * 2))  # JPEG grandes: decodifica a menor resolución y ahorra memoria
-        img = ImageOps.exif_transpose(img)
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            fondo = Image.new("RGB", img.size, "white")
-            fondo.paste(img, mask=img.getchannel("A"))
-            img = fondo
-        img = img.convert("RGB")
-        img.thumbnail((LADO_FOTO, LADO_FOTO), Image.Resampling.LANCZOS)
-        cuadro = ImageOps.pad(img, (LADO_FOTO, LADO_FOTO), color="white")
-    buf = io.BytesIO()
-    cuadro.save(buf, "JPEG", quality=72, optimize=True)
-    return buf.getvalue()
-
 def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc_default=""):
     """Dibuja el uploader de imágenes e incrusta las fotos directamente en la sección del PDF."""
     st.markdown(f"**{titulo}**")
-    fotos_subidas = st.file_uploader("Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'], accept_multiple_files=multiple, key=f"up_{key_prefix}")
+    if not (st.session_state.get("correo_borrador") or "").strip():
+        st.warning("Escribe tu correo en «💾 Progreso en la Nube» (panel lateral) para que las fotos se guarden solas. "
+                   "Sin correo se pierden si se recarga la página.")
+    guardadas = st.session_state.get("_fotos_guardadas", {}).get(key_prefix, [])
+    if guardadas:
+        st.caption(f"Fotos guardadas en tu borrador ({len(guardadas)}). Se incluyen en el reporte; puedes editar su descripción o quitarlas.")
+        with st.container(key=f"galeria_g_{key_prefix}"):
+            for inicio in range(0, len(guardadas), 3):
+                cols = st.columns(3, gap="medium")
+                for col, f in zip(cols, guardadas[inicio:inicio + 3]):
+                    with col:
+                        try:
+                            datos = descargar_foto(f["id"])
+                        except Exception:
+                            st.warning("No se pudo descargar de Drive esta foto guardada.")
+                            continue
+                        st.image(datos, use_container_width=True)
+                        desc_foto = st.text_area("Descripción:", value=f.get("desc", ""), key=f"desc_fot_g_{key_prefix}_{f['id']}", height="content")
+                        st.button("🗑️ Quitar", key=f"quitar_{key_prefix}_{f['id']}", on_click=quitar_foto, args=(key_prefix, f["id"]))
+                        _sec(seccion_id)["fotos"].append((datos, desc_foto))
+    fotos_subidas = st.file_uploader("Agregar más imágenes" if guardadas else "Seleccionar Imágenes", type=['png', 'jpg', 'jpeg'],
+                                     accept_multiple_files=multiple, key=clave_uploader(key_prefix))
     if not fotos_subidas: return
     lista_fotos = fotos_subidas if multiple else [fotos_subidas]
     with st.container(key=f"galeria_{key_prefix}"):
@@ -738,14 +879,16 @@ if es_particulas:
 
         st.divider()
 
-        def comentario(key, columna=None):
-            destino = columna or st
-            return destino.text_area("Comentarios", label_visibility="collapsed", key=key, placeholder="Comentarios...", height="content")
+        def resultado(columna, ok):
+            """Columna de comentarios: solo Cumple / NO CUMPLE."""
+            if ok is None: columna.write("-")
+            elif ok: columna.success("Cumple ✅")
+            else: columna.error("NO CUMPLE ❌")
 
         if es_thermo:
             def sensor_3p(titulo, limite_dif, val_ideal_desc):
                 """Verificación de un sensor con tres lecturas calibrador/monitor y su promedio."""
-                pesos = [1, 1, 1, 2]
+                pesos = [1, 1, 1, 1.3]
                 enc = ["Calibrador", "Monitor", "Diferencia", "Comentarios"]
                 st.markdown(f"#### {titulo}")
                 c1, c2, c3, c4 = st.columns(pesos)
@@ -767,18 +910,15 @@ if es_particulas:
                 c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="top")
                 c1.write(f"**{prom_c:.2f}**" if prom_c is not None else "Promedio")
                 c2.write(f"**{prom_m:.2f}**" if prom_m is not None else "Promedio")
-                dif_pdf = "-"
+                dif_txt, ok = "-", None
                 if prom_c is not None and prom_m is not None:
                     dif_prom = prom_m - prom_c
                     ok = abs(dif_prom) <= limite_dif
-                    (c3.success if ok else c3.error)(f"{dif_prom:.2f} " + ("✅" if ok else "❌"))
-                    dif_pdf = Alerta(f"{dif_prom:.2f} - " + ("Cumple" if ok else "NO CUMPLE"), ok)
-                else:
-                    c3.write("-")
-                obs_sensor = comentario(f"{titulo}_obs", c4)
+                    dif_txt = f"{dif_prom:.2f}"
+                c3.write(f"**{dif_txt}**")
+                resultado(c4, ok)
                 tabla_pdf(S_SENS, titulo, enc, [Neg(f"{prom_c:.2f}" if prom_c is not None else "Promedio"),
-                                                Neg(f"{prom_m:.2f}" if prom_m is not None else "Promedio"), dif_pdf,
-                                                Caja(obs_sensor, "Comentarios...")], pesos)
+                                                Neg(f"{prom_m:.2f}" if prom_m is not None else "Promedio"), Neg(dif_txt), _res(ok)], pesos)
                 nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
                 st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
 
@@ -787,7 +927,7 @@ if es_particulas:
             sensor_3p("Temperatura de flujo", 2.0, "La diferencia debe ser menor a ± 2 °C")
             st.divider()
 
-            pesos_baro = [1.1, 1, 1, 1, 2.2]
+            pesos_baro = [1.1, 1, 1, 1, 1.4]
             enc_baro = ["", "Calibrador", "Monitor", "Diferencia (mmHg)", "Comentarios"]
             st.markdown("#### Presión Barométrica")
             c1, c2, c3, c4, c5 = st.columns(pesos_baro)
@@ -798,29 +938,29 @@ if es_particulas:
                 c_bar = c2.number_input(k_cal, label_visibility="collapsed", value=None, key=k_cal)
                 m_bar = c3.number_input(k_mon, label_visibility="collapsed", value=None, key=k_mon)
                 dif_bar = f"{abs(m_bar - c_bar):.1f}" if c_bar is not None and m_bar is not None else ""
+                ok_bar = abs(m_bar - c_bar) < limite if dif_bar else None
                 c4.write(dif_bar or "-")
-                obs_bar = comentario(k_obs, c5)
+                resultado(c5, ok_bar)
                 st.write(f"<small>{fila_baro}: la diferencia debe ser menor a ± {limite} mmHg</small>", unsafe_allow_html=True)
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, [fila_baro, Caja(c_bar), Caja(m_bar), dif_bar, Caja(obs_bar)], pesos_baro)
+                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, [fila_baro, Caja(c_bar), Caja(m_bar), dif_bar, _res(ok_bar)], pesos_baro)
             nota_pdf(S_SENS, "Presión barométrica: diferencia menor a ± 10 mmHg en la lectura y menor a ± 2 mmHg después de la calibración.")
 
-            pesos_pfs = [1, 1.4, 1, 1, 2]
+            pesos_pfs = [1, 1.4, 1, 1]
             st.markdown("#### Presión de Flujo de span (mmHg)")
-            c1, c2, c3, c4, c5 = st.columns(pesos_pfs)
-            c1.write(""); c2.write("**Manómetro Certificado**"); c3.write("**Monitor Inicial**"); c4.write("**Monitor Final**"); c5.write("**Comentarios**")
+            c1, c2, c3, c4 = st.columns(pesos_pfs)
+            c1.write(""); c2.write("**Manómetro Certificado**"); c3.write("**Monitor Inicial**"); c4.write("**Monitor Final**")
 
-            c1, c2, c3, c4, c5 = st.columns(pesos_pfs, vertical_alignment="top")
+            c1, c2, c3, c4 = st.columns(pesos_pfs, vertical_alignment="top")
             c1.write("Lectura")
             man_dif = c2.number_input("man_dif", label_visibility="collapsed", value=None, key="pfs_man")
             mon_ini = c3.number_input("mon_ini", label_visibility="collapsed", value=None, key="pfs_mini")
             mon_fin = c4.number_input("mon_fin", label_visibility="collapsed", value=None, key="pfs_mfin")
-            obs_pfs = comentario("obs_pfs", c5)
 
-            enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final", "Comentarios"]
-            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin), Caja(obs_pfs)], pesos_pfs)
+            enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final"]
+            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin)], pesos_pfs)
 
             def render_flujo_thermo(titulo, key_prefix):
-                pesos_flujo = [1, 1, 1, 1, 2]
+                pesos_flujo = [1, 1, 1, 1, 1.4]
                 st.markdown(f"#### {titulo} (Lpm)")
                 c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
                 c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**% Desviación**"); c5.write("**Comentarios**")
@@ -829,7 +969,8 @@ if es_particulas:
                 c1.write("Lectura")
                 f_cal = c2.number_input("f_cal", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
                 f_mon = c3.number_input("f_mon", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
-                obs_flujo = comentario(f"{key_prefix}_obs", c5)
+                ok_flujo = None if f_mon is None else 16.00 <= f_mon <= 17.34
+                resultado(c5, ok_flujo)
 
                 desv_str = ""
                 if f_cal and f_mon is not None:
@@ -840,7 +981,7 @@ if es_particulas:
                 st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.</small>", unsafe_allow_html=True)
 
                 enc_flujo = ["", "Calibrador", "Monitor", "% Desviación", "Comentarios"]
-                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, Caja(obs_flujo)], pesos_flujo)
+                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, _res(ok_flujo)], pesos_flujo)
 
             render_flujo_thermo("Flujo Automático", "fauto")
             render_flujo_thermo("Flujo Manual", "fman")
@@ -851,18 +992,17 @@ if es_particulas:
             FLUJO_BAM_NOMINAL, FLUJO_BAM_MIN, FLUJO_BAM_MAX = 16.67, 16.00, 17.34
 
             # --- Etapa 1: verificación en el punto nominal ---
-            pesos_verif = [1, 1, 1.2, 2.3]
+            pesos_verif = [1, 1, 1.2]
             st.markdown("#### Verificación de flujo (lpm)")
-            c1, c2, c3, c4 = st.columns(pesos_verif)
-            c1.write("**Calibrador (lpm)**"); c2.write("**Monitor (lpm)**"); c3.write("**Resultado**"); c4.write("**Comentarios**")
-            c1, c2, c3, c4 = st.columns(pesos_verif, vertical_alignment="top")
+            c1, c2, c3 = st.columns(pesos_verif)
+            c1.write("**Calibrador (lpm)**"); c2.write("**Monitor (lpm)**"); c3.write("**Resultado**")
+            c1, c2, c3 = st.columns(pesos_verif, vertical_alignment="top")
             c1.number_input("Calibrador verificación", value=FLUJO_BAM_NOMINAL, disabled=True, label_visibility="collapsed", key=f"bam_fv_cal_{pm_tipo}")
             verif_mon = c2.number_input("Monitor verificación", value=None, label_visibility="collapsed", key=f"bam_fv_mon_{pm_tipo}")
             cumple_verif = None if verif_mon is None else FLUJO_BAM_MIN <= verif_mon <= FLUJO_BAM_MAX
             with c3: evaluar_y_mostrar(verif_mon, FLUJO_BAM_MIN, FLUJO_BAM_MAX)
-            obs_verif = comentario(f"bam_fv_obs_{pm_tipo}", c4)
-            tabla_pdf(S_SENS, "Verificación de flujo (lpm)", ["Calibrador (lpm)", "Monitor (lpm)", "Resultado", "Comentarios"],
-                      [Caja(FLUJO_BAM_NOMINAL), Caja(verif_mon), _res(cumple_verif), Caja(obs_verif)], pesos_verif)
+            tabla_pdf(S_SENS, "Verificación de flujo (lpm)", ["Calibrador (lpm)", "Monitor (lpm)", "Resultado"],
+                      [Caja(FLUJO_BAM_NOMINAL), Caja(verif_mon), _res(cumple_verif)], pesos_verif)
             st.write("<small>El valor del flujo debe ser 16.67 ±0.67 lpm</small>", unsafe_allow_html=True)
 
             # --- Etapa 2: ajuste en tres puntos, solo si la verificación no cumple ---
@@ -923,18 +1063,7 @@ if es_particulas:
             # BAM-1020 (manual Met One, 3.4.7 "Span Membrane" y 6.9 "Zero Filter Background Test"):
             # se compara la masa medida de la membrana span contra su valor de fábrica; criterio < ±5 %.
             ERROR_SPAN_MAX = 5.0
-            st.markdown("#### Ingreso de datos de la Membrana Span")
-            col_cm1, col_cm2 = st.columns(2)
-            with col_cm1:
-                st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
-                st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
-                st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
-            with col_cm2:
-                background = st.number_input("Background (mg/m³)", value=0.0, format="%.4f", step=0.0001, key="cm_bkg")
-                span_esperado = st.number_input("Expected Span Membrane (mg/cm²)", value=0.8, format="%.4f", step=0.0001, key="cm_span_esp",
-                                                help="Valor de la membrana span del certificado de fábrica del BAM (usualmente cerca de 0.800).")
-
-            st.markdown("---")
+            st.markdown("#### Membrana Span")
             pesos_mas = [1.2, 1, 1.4]
             c1, c2, c3 = st.columns(pesos_mas)
             with c1: st.write("**Lectura**")
@@ -954,7 +1083,10 @@ if es_particulas:
 
             c1, c2, c3 = st.columns(pesos_mas)
             with c1: st.write("Measured Mass (mg/cm²)")
-            with c2: st.write(f"{span_esperado:.4f}" if span_esperado is not None else "-")
+            # el valor ideal es la masa de la membrana span de fábrica (certificado del BAM, usualmente 0.800)
+            with c2: span_esperado = st.number_input("Expected Span Membrane (mg/cm²)", value=0.8, format="%.4f", step=0.0001, key="cm_span_esp",
+                                                     label_visibility="collapsed",
+                                                     help="Expected Span Membrane del certificado de fábrica del BAM (usualmente cerca de 0.800).")
             with c3: masa_medida = st.number_input("Measured Mass (mg/cm²)", value=None, format="%.4f", step=0.0001, key="cm_masa_med",
                                                    label_visibility="collapsed")
 
@@ -972,10 +1104,6 @@ if es_particulas:
                 else: st.error(f"{error_span:.2f}% — NO CUMPLE ❌")
 
             def _cuatro(v): return f"{v:.4f}" if v is not None else None
-            for etiqueta, valor in [("Equipo de calibración (foils)", st.session_state.get("cm_eq")), ("Reference No. / Certificado", st.session_state.get("cm_ref")),
-                                    ("Fecha de certificación de foils", st.session_state.get("cm_fecha")), ("Background (mg/m³)", _cuatro(background)),
-                                    ("Expected Span Membrane (mg/cm²)", _cuatro(span_esperado))]:
-                kv(S_MAS, etiqueta, valor)
             enc_masas = ["Lectura", "Valor Ideal", "Lectura del equipo"]
             tabla_pdf(S_MAS, "", enc_masas, ["Zero Count (I1)", "N/A", Caja(i1)], pesos_mas)
             tabla_pdf(S_MAS, "", enc_masas, ["Span Count (I2)", "N/A", Caja(i2)], pesos_mas)
@@ -1099,6 +1227,23 @@ if es_gas:
 # ==========================================
 # DEFINICIÓN FUNCIÓN DE REVISIÓN DETALLADA
 # ==========================================
+def encabezado_componentes():
+    c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3])
+    with c1: st.write("**Componente**")
+    with c2: st.write("**Estado**")
+    with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
+    with c4: st.markdown("<b>Reemplazo</b>", unsafe_allow_html=True)
+    with c5: st.write("**Observaciones**")
+
+# BAM: limpieza, revisión, reemplazo y revisión detallada van juntos en una sola tabla de componentes.
+# "Bomba" y "Bomba de Vacío" se unen en una fila; "O-rings" se une con "Sistema neumático y O-rings".
+COMPONENTES_BAM = [("Gabinete", "bam_c_gab"), ("Tubo de la traza", "bam_c_tub"), ("Cabezal", "bam_c_cab"),
+                   ("Tarjetas electrónicas", "bam_c_tarj"), ("Ventilador", "bam_c_vent"), ("Celda de medición", "bam_c_celd"),
+                   ("Display", "bam_c_disp"), ("Calefactor de la traza", "bam_c_calf"), ("Traza", "bam_c_traza"),
+                   ("Fugas", "bam_c_fugas"), ("Fuente de voltaje", "bam_c_fvolt"), ("Cinta de vidrio / filtro", "bam_c_cinta"),
+                   ("Bomba de vacío", "bam_c_bomba"), ("Sistema neumático y O-rings", "d_orings_pm"),
+                   ("Sensores de humedad / temperatura", "d_sensores")]
+
 def bloque_revision_detallada():
     """Función para encapsular la sección Detallada y moverla dinámicamente."""
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
@@ -1107,13 +1252,8 @@ def bloque_revision_detallada():
         if es_externo:
             renderizar_fotos_seccion(S_DET, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
-            
-        c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3])
-        with c1: st.write("**Componente**")
-        with c2: st.write("**Estado**")
-        with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
-        with c4: st.markdown("<b>Reemplazo</b>", unsafe_allow_html=True)
-        with c5: st.write("**Observaciones**")
+
+        encabezado_componentes()
 
         if es_gas:
             if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)"]:
@@ -1143,12 +1283,7 @@ def bloque_revision_detallada():
 with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
     pdf_ctx["sec"], pdf_ctx["sub"] = S_LIM, ""
     if es_gas:
-        c1, c2, c3, c4, c5 = st.columns([2.2, 1.1, 1.1, 1.1, 3])
-        with c1: st.write("**Componente**")
-        with c2: st.write("**Estado**")
-        with c3: st.markdown("<b>Limpieza</b>", unsafe_allow_html=True)
-        with c4: st.markdown("<b>Reemplazo</b>", unsafe_allow_html=True)
-        with c5: st.write("**Observaciones**")
+        encabezado_componentes()
 
         if gas_sel == "Ozono (O3)":
             fila_comp("Lámpara UV (revisión electrónica)", "b_lamp")
@@ -1168,7 +1303,15 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
             fila_comp("Mangueras", "b_mang_so2")
             fila_comp("Lámpara UV", "b_lamp_so2")
     
-    elif es_particulas:
+    elif es_bam:
+        if es_externo:
+            renderizar_fotos_seccion(S_LIM, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
+            st.divider()
+        encabezado_componentes()
+        for nombre_comp, key_comp in COMPONENTES_BAM:
+            fila_comp(nombre_comp, key_comp)
+
+    elif es_thermo:
         st.markdown("<div class='header-tabla'>Limpieza de:</div>", unsafe_allow_html=True)
         pdf_ctx["sub"] = "Limpieza de:"
         fila_simple("Gabinete", "limp_gab")
@@ -1198,7 +1341,7 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
         fila_simple("Bomba de Vacío", "reemp_bomba")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
-if es_externo:
+if es_externo and not es_bam:  # en los BAM la revisión detallada va dentro de Limpieza, revisión y reemplazo
     bloque_revision_detallada()
 
 # ==========================================
@@ -1395,7 +1538,7 @@ if es_gas:
             renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
-if not es_externo:
+if not es_externo and not es_bam:
     bloque_revision_detallada()
 
 # ==========================================
@@ -1484,15 +1627,30 @@ def nombre_base_archivo():
 
 def nombre_pdf(): return f"{nombre_base_archivo()}.pdf"
 
+# Campos que deben estar llenos para descargar o enviar el formato (no se aceptan solo espacios)
+CAMPOS_OBLIGATORIOS = [("n_tec", "Nombre del Técnico / Operador"), ("n_sup", "Nombre de quien supervisa / revisa"),
+                       ("n_sema", "Nombre del Supervisor SEMADET"), ("res_obs", "Observaciones Generales"), ("res_conc", "Conclusiones")]
+faltantes = [etiqueta for k, etiqueta in CAMPOS_OBLIGATORIOS if not str(st.session_state.get(k) or "").strip()]
+sin_estacion = estacion_sel == "Selecciona una opción..."
+bloqueado = sin_estacion or bool(faltantes)
+motivo_bloqueo = ("Selecciona la Estación para habilitar la descarga" if sin_estacion
+                  else "Completa: " + ", ".join(faltantes) if faltantes else None)
+if faltantes and not sin_estacion:
+    st.warning("⚠️ Para descargar o enviar el formato completa en **Resumen y firmas finales**:\n\n"
+               + "\n".join(f"- {f}" for f in faltantes))
+
 col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
 mensajes = st.columns(3)[2].container()
 
 with col_imprimir:
+    # "Guardar PDF Visual" también entrega el formato, así que sigue el mismo bloqueo que la descarga
+    estilo_imprimir = ("background-color: #A6A6A6; cursor: not-allowed;" if bloqueado else "background-color: #00B2A9; cursor: pointer;")
+    accion_imprimir = "" if bloqueado else 'onclick="window.parent.print()"'
     components.html(
-        """
-        <style>body { margin: 0; }</style>
+        f"""
+        <style>body {{ margin: 0; }}</style>
         <div style="display: flex; align-items: center; justify-content: center; height: 80px;" id="btn-imprimir">
-            <button onclick="window.parent.print()" style="padding: 14px 28px; font-size: 16px; font-weight: bold; background-color: #00B2A9; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+            <button {accion_imprimir} {"disabled" if bloqueado else ""} title="{motivo_bloqueo or ''}" style="padding: 14px 28px; font-size: 16px; font-weight: bold; {estilo_imprimir} color: white; border: none; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
                 🖨️ Imprimir / Guardar PDF Visual
             </button>
         </div>
@@ -1500,16 +1658,15 @@ with col_imprimir:
     )
 
 with col_pdf:
-    sin_estacion = estacion_sel == "Selecciona una opción..."
     # El PDF se construye al pulsar el botón (no en cada cambio del formulario) con los datos de esta ejecución
-    st.download_button("📄 Descargar PDF del formato", data=b"" if sin_estacion else generar_pdf, file_name=nombre_pdf(),
-                       mime="application/pdf", use_container_width=True, disabled=sin_estacion, on_click="ignore",
-                       help="Selecciona la Estación para habilitar la descarga" if sin_estacion else None)
+    st.download_button("📄 Descargar PDF del formato", data=b"" if bloqueado else generar_pdf, file_name=nombre_pdf(),
+                       mime="application/pdf", use_container_width=True, disabled=bloqueado, on_click="ignore",
+                       help=motivo_bloqueo)
 
 def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
     media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
     # create siempre agrega un archivo nuevo: los reportes anteriores con el mismo nombre se conservan
-    return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute()
+    return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute(num_retries=3)
 
 def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
     mensaje = EmailMessage()
@@ -1522,10 +1679,12 @@ def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
     servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
 
 with col_drive:
-    if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True):
+    if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True, disabled=bloqueado, help=motivo_bloqueo):
         faltan = secrets_faltantes()
         if sin_estacion:
             mensajes.error("⚠️ Falla: Selecciona la Estación de Monitoreo al inicio del formato.")
+        elif faltantes:  # respaldo por si el botón se pulsa antes de que se actualice el estado
+            mensajes.error("⚠️ Falta completar: " + ", ".join(faltantes))
         elif faltan:
             mensajes.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
         else:
