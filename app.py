@@ -18,7 +18,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from pdf_formato import construir_pdf, Caja, Alerta, Neg
 
-st.set_page_config(layout="wide", page_title="Calibración SIMAJ")
+_favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.png")  # "si" del logo SIMAJ
+st.set_page_config(layout="wide", page_title="Calibración SIMAJ", page_icon=_favicon if os.path.exists(_favicon) else None)
 
 # ==========================================
 # CSS GLOBAL: CAPTURA EN PANTALLA E IMPRESIÓN DEL NAVEGADOR
