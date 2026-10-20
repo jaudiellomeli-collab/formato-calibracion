@@ -13,7 +13,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.graphics.charts.lineplots import LinePlot
 from reportlab.graphics.shapes import Circle, Drawing, Group, Line, String
 from reportlab.graphics.widgets.markers import makeMarker
-from reportlab.platypus import CondPageBreak, HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import CondPageBreak, HRFlowable, Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 MARGEN = 1.0 * cm
 ANCHO = letter[0] - 2 * MARGEN
@@ -230,7 +230,7 @@ def _firmas(grupos):
     filas.append([_firma(interno) for _ in columnas])
     t = Table(filas, colWidths=[ancho] * len(columnas), hAlign="CENTER")
     t.setStyle(_estilo(("VALIGN", (0, 0), (-1, -1), "TOP"), pad=(6, 6, 2, 2)))
-    return t
+    return KeepTogether([t])
 
 
 def _pares(pares, firmas):

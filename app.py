@@ -900,40 +900,105 @@ if es_particulas:
             renderizar_fotos_seccion(S_SENS, "📷 Evidencias de Sensores y Flujo", "fot_sens", multiple=True)
 
     with st.expander("⚖️ CALIBRACIÓN DE MASAS (FOILS)", expanded=req_comp):
-        st.markdown("#### Ingreso de datos de Foils de Calibración")
-        col_cm1, col_cm2 = st.columns(2)
-        with col_cm1:
-            st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
-            st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
-        with col_cm2:
-            # Sin fecha ni coeficiente predeterminados: dependen del juego de foils y del equipo. Se capturan o se
-            # recuperan con el borrador de esta estación/equipo (botón Cargar).
-            st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
-            st.number_input("Mass Coefficient Inicial", value=None, key="cm_mass_ini", placeholder="Valor actual del equipo",
-                            help="Es propio de cada equipo: captúralo de la pantalla del monitor o de su registro anterior.")
+        if es_bam:
+            # BAM-1020 (manual Met One, 3.4.7 "Span Membrane" y 6.9 "Zero Filter Background Test"):
+            # se compara la masa medida de la membrana span contra su valor de fábrica; criterio < ±5 %.
+            ERROR_SPAN_MAX = 5.0
+            st.markdown("#### Ingreso de datos de la Membrana Span")
+            col_cm1, col_cm2 = st.columns(2)
+            with col_cm1:
+                st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
+                st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
+                st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
+            with col_cm2:
+                background = st.number_input("Background (mg/m³)", value=0.0, format="%.4f", step=0.0001, key="cm_bkg")
+                span_esperado = st.number_input("Expected Span Membrane (mg/cm²)", value=0.8, format="%.4f", step=0.0001, key="cm_span_esp",
+                                                help="Valor de la membrana span del certificado de fábrica del BAM (usualmente cerca de 0.800).")
 
-        st.markdown("---")
-        c1, c2, c3 = st.columns(3)
-        with c1: st.write("**Lectura**")
-        with c2: st.write("**Foil Value Span (Ideal)**")
-        with c3: st.write("**Beta Average (Lectura del equipo)**")
+            st.markdown("---")
+            pesos_mas = [1.2, 1, 1.4]
+            c1, c2, c3 = st.columns(pesos_mas)
+            with c1: st.write("**Lectura**")
+            with c2: st.write("**Valor Ideal**")
+            with c3: st.write("**Lectura del equipo**")
 
-        c1, c2, c3 = st.columns(3)
-        with c1: st.write("Calibración Cero")
-        with c2: st.write("N/A")
-        with c3: st.number_input("Beta Cero", value=None, key="cm_beta_cero", label_visibility="collapsed")
+            c1, c2, c3 = st.columns(pesos_mas)
+            with c1: st.write("Zero Count (I1)")
+            with c2: st.write("N/A")
+            with c3: i1 = st.number_input("Zero Count (I1)", value=None, min_value=0, step=1, format="%d", key="cm_i1", label_visibility="collapsed",
+                                          help="Valores típicos entre 600,000 y 2,200,000.")
 
-        c1, c2, c3 = st.columns(3)
-        with c1: st.write("Calibración Span")
-        with c2: st.number_input("Span Ideal", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
-        with c3: st.number_input("Beta Span", value=None, key="cm_beta_span", label_visibility="collapsed")
+            c1, c2, c3 = st.columns(pesos_mas)
+            with c1: st.write("Span Count (I2)")
+            with c2: st.write("N/A")
+            with c3: i2 = st.number_input("Span Count (I2)", value=None, min_value=0, step=1, format="%d", key="cm_i2", label_visibility="collapsed")
 
-        for etiqueta, k in [("Equipo de calibración (foils)", "cm_eq"), ("Reference No. / Certificado", "cm_ref"),
-                            ("Fecha de certificación de foils", "cm_fecha"), ("Mass Coefficient inicial", "cm_mass_ini")]:
-            kv(S_MAS, etiqueta, st.session_state.get(k))
-        enc_masas = ["Lectura", "Foil Value Span (Ideal)", "Beta Average (Lectura del equipo)"]
-        tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
-        tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
+            c1, c2, c3 = st.columns(pesos_mas)
+            with c1: st.write("Measured Mass (mg/cm²)")
+            with c2: st.write(f"{span_esperado:.4f}" if span_esperado is not None else "-")
+            with c3: masa_medida = st.number_input("Measured Mass (mg/cm²)", value=None, format="%.4f", step=0.0001, key="cm_masa_med",
+                                                   label_visibility="collapsed")
+
+            # % Error = ((Measured Mass - Expected Span Membrane) / Expected Span Membrane) * 100
+            error_span = cumple_span = None
+            if masa_medida is not None and span_esperado:
+                error_span = (masa_medida - span_esperado) / span_esperado * 100
+                cumple_span = abs(error_span) <= ERROR_SPAN_MAX
+            c1, c2, c3 = st.columns(pesos_mas)
+            with c1: st.write("**% Error**")
+            with c2: st.write(f"< ±{ERROR_SPAN_MAX:g}%")
+            with c3:
+                if error_span is None: st.write("-")
+                elif cumple_span: st.success(f"{error_span:.2f}% — Cumple ✅")
+                else: st.error(f"{error_span:.2f}% — NO CUMPLE ❌")
+
+            def _cuatro(v): return f"{v:.4f}" if v is not None else None
+            for etiqueta, valor in [("Equipo de calibración (foils)", st.session_state.get("cm_eq")), ("Reference No. / Certificado", st.session_state.get("cm_ref")),
+                                    ("Fecha de certificación de foils", st.session_state.get("cm_fecha")), ("Background (mg/m³)", _cuatro(background)),
+                                    ("Expected Span Membrane (mg/cm²)", _cuatro(span_esperado))]:
+                kv(S_MAS, etiqueta, valor)
+            enc_masas = ["Lectura", "Valor Ideal", "Lectura del equipo"]
+            tabla_pdf(S_MAS, "", enc_masas, ["Zero Count (I1)", "N/A", Caja(i1)], pesos_mas)
+            tabla_pdf(S_MAS, "", enc_masas, ["Span Count (I2)", "N/A", Caja(i2)], pesos_mas)
+            tabla_pdf(S_MAS, "", enc_masas, ["Measured Mass (mg/cm²)", _cuatro(span_esperado), Caja(_cuatro(masa_medida))], pesos_mas)
+            tabla_pdf(S_MAS, "", enc_masas, [Neg("% Error"), f"< ±{ERROR_SPAN_MAX:g}%",
+                                             Alerta(f"{error_span:.2f}% - " + ("Cumple" if cumple_span else "NO CUMPLE"), cumple_span) if error_span is not None else ""], pesos_mas)
+            nota_pdf(S_MAS, "% Error = ((Measured Mass - Expected Span Membrane) / Expected Span Membrane) x 100. Criterio de aceptación: < ±5%.")
+        else:
+            st.markdown("#### Ingreso de datos de Foils de Calibración")
+            col_cm1, col_cm2 = st.columns(2)
+            with col_cm1:
+                st.text_input("Equipo de Calibración (Foils)", placeholder="Ej. Foil Set CM3534", key="cm_eq")
+                st.text_input("Reference No. / Certificado", placeholder="Ej. FH125C14", key="cm_ref")
+            with col_cm2:
+                # Sin fecha ni coeficiente predeterminados: dependen del juego de foils y del equipo. Se capturan o se
+                # recuperan con el borrador de esta estación/equipo (botón Cargar).
+                st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
+                st.number_input("Mass Coefficient Inicial", value=None, key="cm_mass_ini", placeholder="Valor actual del equipo",
+                                help="Es propio de cada equipo: captúralo de la pantalla del monitor o de su registro anterior.")
+
+            st.markdown("---")
+            c1, c2, c3 = st.columns(3)
+            with c1: st.write("**Lectura**")
+            with c2: st.write("**Foil Value Span (Ideal)**")
+            with c3: st.write("**Beta Average (Lectura del equipo)**")
+
+            c1, c2, c3 = st.columns(3)
+            with c1: st.write("Calibración Cero")
+            with c2: st.write("N/A")
+            with c3: st.number_input("Beta Cero", value=None, key="cm_beta_cero", label_visibility="collapsed")
+
+            c1, c2, c3 = st.columns(3)
+            with c1: st.write("Calibración Span")
+            with c2: st.number_input("Span Ideal", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
+            with c3: st.number_input("Beta Span", value=None, key="cm_beta_span", label_visibility="collapsed")
+
+            for etiqueta, k in [("Equipo de calibración (foils)", "cm_eq"), ("Reference No. / Certificado", "cm_ref"),
+                                ("Fecha de certificación de foils", "cm_fecha"), ("Mass Coefficient inicial", "cm_mass_ini")]:
+                kv(S_MAS, etiqueta, st.session_state.get(k))
+            enc_masas = ["Lectura", "Foil Value Span (Ideal)", "Beta Average (Lectura del equipo)"]
+            tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
+            tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
 
         if es_externo:
             st.divider()
