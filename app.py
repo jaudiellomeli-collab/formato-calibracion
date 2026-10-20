@@ -150,14 +150,33 @@ def limpiar_formulario():
         if k not in conservar and not k.startswith("_"):
             del st.session_state[k]
 
-def buscar_borrador(servicio, carpeta, nombre):
-    nombre_q = nombre.replace("\\", "\\\\").replace("'", "\\'")
-    res = servicio.files().list(q=f"name='{nombre_q}' and '{carpeta}' in parents and trashed=false", fields="files(id)").execute()
+CARPETA_BORRADORES = "Borradores"
+TIPO_CARPETA = "application/vnd.google-apps.folder"
+
+def _q(texto):
+    """Escapa un texto para usarlo entre comillas en una consulta de Drive."""
+    return str(texto).replace("\\", "\\\\").replace("'", "\\'")
+
+def carpeta_drive(servicio, raiz, ruta):
+    """Id de la subcarpeta raiz/ruta[0]/ruta[1]/...; crea las que falten. Solo ve carpetas creadas por esta app (permiso drive.file)."""
+    padre = raiz
+    for nombre in ruta:
+        res = servicio.files().list(q=f"name='{_q(nombre)}' and '{padre}' in parents and mimeType='{TIPO_CARPETA}' and trashed=false",
+                                    fields="files(id)").execute().get("files", [])
+        padre = res[0]["id"] if res else servicio.files().create(body={"name": nombre, "mimeType": TIPO_CARPETA, "parents": [padre]},
+                                                                  fields="id").execute()["id"]
+    return padre
+
+def buscar_borrador(servicio, raiz, nombre):
+    """Busca el borrador en la carpeta Borradores y, por compatibilidad, en la carpeta principal (donde se guardaban antes)."""
+    carpeta_b = carpeta_drive(servicio, raiz, [CARPETA_BORRADORES])
+    res = servicio.files().list(q=f"name='{_q(nombre)}' and ('{carpeta_b}' in parents or '{raiz}' in parents) and trashed=false",
+                                fields="files(id)").execute()
     archivos = res.get('files', [])
-    if not archivos: return None, {}
+    if not archivos: return None, {}, carpeta_b
     archivo_id = archivos[0]['id']
     contenido = servicio.files().get_media(fileId=archivo_id).execute()
-    return archivo_id, json.loads(contenido.decode('utf-8'))
+    return archivo_id, json.loads(contenido.decode('utf-8')), carpeta_b
 
 # ==========================================
 # PANEL LATERAL: GUARDAR/CARGAR PROGRESO (CROSS-DEVICE)
@@ -186,13 +205,13 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
                 servicio = build("drive", "v3", credentials=credenciales_google())
                 carpeta = st.secrets["drive_carpeta_id"]
                 nombre_borrador = f"borrador_{correo_borrador.strip()}.json"
-                archivo_id, dict_global = buscar_borrador(servicio, carpeta, nombre_borrador)
+                archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, carpeta, nombre_borrador)
                 dict_global[vista_actual] = datos_para_borrador()
                 media = MediaIoBaseUpload(io.BytesIO(json.dumps(dict_global).encode('utf-8')), mimetype='application/json', resumable=True)
                 if archivo_id:
                     servicio.files().update(fileId=archivo_id, media_body=media).execute()
                 else:
-                    servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta]}, media_body=media).execute()
+                    servicio.files().create(body={'name': nombre_borrador, 'parents': [carpeta_b]}, media_body=media).execute()
             st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}.")
         except Exception as e:
             st.sidebar.error(f"Error al guardar: {error_google(e)}")
@@ -209,7 +228,7 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
         try:
             with st.spinner("Cargando..."):
                 servicio = build("drive", "v3", credentials=credenciales_google())
-                archivo_id, dict_global = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], f"borrador_{correo_borrador.strip()}.json")
+                archivo_id, dict_global, _ = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], f"borrador_{correo_borrador.strip()}.json")
         except Exception as e:
             st.sidebar.error(f"Error al cargar: {error_google(e)}")
         if dict_global is not None:
@@ -1444,6 +1463,11 @@ def _segmento_archivo(texto, vacio):
     limpio = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", str(texto)).strip(" .-")
     return limpio or vacio
 
+def codigo_equipo():
+    """Código del equipo usado en el nombre del archivo y en la carpeta de Drive (O3, NOx, CO, SO2, PM10_BAM, PM2.5_Thermo...)."""
+    if es_gas: return {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", "Monóxido de Carbono (CO)": "CO", "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, "")
+    return f"{pm_tipo}_{'BAM' if es_bam else 'Thermo'}"
+
 def nombre_base_archivo():
     estaciones_abrev = {
         "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN",
@@ -1452,11 +1476,7 @@ def nombre_base_archivo():
         "Tlaquepaque": "TLA"
     }
     est_cod = estaciones_abrev.get(estacion_sel, "XXX")
-
-    if es_gas: gas_cod = {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", "Monóxido de Carbono (CO)": "CO", "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, "")
-    else:
-        marca_pm = "BAM" if es_bam else "Thermo"
-        gas_cod = f"{pm_tipo}_{marca_pm}"
+    gas_cod = codigo_equipo()
 
     # estaciones sin número de serie registrado: se marca en lugar de dejar un segmento vacío ("__")
     serie = _segmento_archivo(num_serie_val, "SIN-NS")
@@ -1515,9 +1535,12 @@ with col_drive:
             with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
                 try:
                     servicio_drive = build("drive", "v3", credentials=credenciales_google())
-                    pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", st.secrets["drive_carpeta_id"])
+                    # cada reporte va a su carpeta Estación/Equipo dentro de la carpeta principal
+                    ruta_drive = [estacion_sel, codigo_equipo()]
+                    carpeta_reporte = carpeta_drive(servicio_drive, st.secrets["drive_carpeta_id"], ruta_drive)
+                    pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta_reporte)
                     enlace = pdf_subido.get("webViewLink", "")
-                    st.success(f"✅ PDF guardado en Drive como: {nombre_del_pdf}")
+                    st.success(f"✅ PDF guardado en Drive en {' / '.join(ruta_drive)} como: {nombre_del_pdf}")
                 except Exception as e:
                     st.error(f"❌ No se pudo guardar en Drive: {error_google(e)}")
             with mensajes, st.spinner("Enviando el PDF al coordinador..."):
