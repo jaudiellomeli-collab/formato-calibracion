@@ -557,9 +557,9 @@ def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     with c1: st.write(param)
     with c2: st.write(unit)
     with c3: st.write(ideal_str)
-    with c4: val_ini = st.number_input("ini", key=f"ini_{key}", label_visibility="collapsed", value=None)
+    with c4: val_ini = st.number_input("ini", format="%.4f", key=f"ini_{key}", label_visibility="collapsed", value=None)
     with c5: r_ini = evaluar_y_mostrar(val_ini, min_val, max_val)
-    with c6: val_fin = st.number_input("fin", key=f"fin_{key}", label_visibility="collapsed", value=None)
+    with c6: val_fin = st.number_input("fin", format="%.4f", key=f"fin_{key}", label_visibility="collapsed", value=None)
     with c7: r_fin = evaluar_y_mostrar(val_fin, min_val, max_val)
     tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(val_ini), _res(r_ini), Caja(val_fin), _res(r_fin)], PESOS_PG)
     return r_ini, r_fin
@@ -677,7 +677,7 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
         kv(S_DAT, "N/S (Automático)", ns_capturado)
         
-        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", value=634.0, key="presion_unica"))
+        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", format="%.4f", value=634.0, key="presion_unica"))
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
         if falla == "Sí 🔴":
@@ -700,8 +700,8 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             st.markdown("### Inicial")
             fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_ini"), "Inicial")
             kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None, key="hora_ini"), "Inicial")
-            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", value=None, key="temp_ext_ini"), "Inicial")
-            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", value=None, key="temp_int_ini"), "Inicial")
+            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", format="%.4f", value=None, key="temp_ext_ini"), "Inicial")
+            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", format="%.4f", value=None, key="temp_int_ini"), "Inicial")
             datos_resumen["Fecha de Servicio"] = str(fecha_ref)
             año_f, mes_f, dia_f = fecha_ref.strftime("%Y"), fecha_ref.strftime("%m"), fecha_ref.strftime("%d")
             
@@ -709,8 +709,8 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             st.markdown("### Final")
             kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_fin"), "Final")
             kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None, key="hora_fin"), "Final")
-            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", value=None, key="temp_ext_fin"), "Final")
-            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", value=None, key="temp_int_fin"), "Final")
+            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", format="%.4f", value=None, key="temp_ext_fin"), "Final")
+            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", format="%.4f", value=None, key="temp_int_fin"), "Final")
 
 # ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
@@ -898,9 +898,9 @@ if es_particulas:
                 cal_v, mon_v = [], []
                 for i in range(1, 4):
                     c1, c2, c3, c4 = st.columns(pesos)
-                    c_val = c1.number_input(f"c{i}", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
-                    m_val = c2.number_input(f"m{i}", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
-                    dif_txt = f"{(m_val - c_val):.2f}" if c_val is not None and m_val is not None else "-"
+                    c_val = c1.number_input(f"c{i}", format="%.4f", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
+                    m_val = c2.number_input(f"m{i}", format="%.4f", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
+                    dif_txt = f"{(m_val - c_val):.4f}" if c_val is not None and m_val is not None else "-"
                     c3.write(dif_txt)
                     tabla_pdf(S_SENS, titulo, enc, [Caja(c_val), Caja(m_val), dif_txt, ""], pesos)
                     if c_val is not None: cal_v.append(c_val)
@@ -909,17 +909,17 @@ if es_particulas:
                 prom_c = sum(cal_v) / len(cal_v) if cal_v else None
                 prom_m = sum(mon_v) / len(mon_v) if mon_v else None
                 c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="top")
-                c1.write(f"**{prom_c:.2f}**" if prom_c is not None else "Promedio")
-                c2.write(f"**{prom_m:.2f}**" if prom_m is not None else "Promedio")
+                c1.write(f"**{prom_c:.4f}**" if prom_c is not None else "Promedio")
+                c2.write(f"**{prom_m:.4f}**" if prom_m is not None else "Promedio")
                 dif_txt, ok = "-", None
                 if prom_c is not None and prom_m is not None:
                     dif_prom = prom_m - prom_c
                     ok = abs(dif_prom) <= limite_dif
-                    dif_txt = f"{dif_prom:.2f}"
+                    dif_txt = f"{dif_prom:.4f}"
                 c3.write(f"**{dif_txt}**")
                 resultado(c4, ok)
-                tabla_pdf(S_SENS, titulo, enc, [Neg(f"{prom_c:.2f}" if prom_c is not None else "Promedio"),
-                                                Neg(f"{prom_m:.2f}" if prom_m is not None else "Promedio"), Neg(dif_txt), _res(ok)], pesos)
+                tabla_pdf(S_SENS, titulo, enc, [Neg(f"{prom_c:.4f}" if prom_c is not None else "Promedio"),
+                                                Neg(f"{prom_m:.4f}" if prom_m is not None else "Promedio"), Neg(dif_txt), _res(ok)], pesos)
                 nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
                 st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
 
@@ -936,9 +936,9 @@ if es_particulas:
             for fila_baro, k_cal, k_mon, k_obs, limite in [("Lectura", "C_bar_l", "M_bar_l", "obs_bar1", 10), ("Calibración", "C_bar_c", "M_bar_c", "obs_bar2", 2)]:
                 c1, c2, c3, c4, c5 = st.columns(pesos_baro, vertical_alignment="top")
                 c1.write(fila_baro)
-                c_bar = c2.number_input(k_cal, label_visibility="collapsed", value=None, key=k_cal)
-                m_bar = c3.number_input(k_mon, label_visibility="collapsed", value=None, key=k_mon)
-                dif_bar = f"{abs(m_bar - c_bar):.1f}" if c_bar is not None and m_bar is not None else ""
+                c_bar = c2.number_input(k_cal, format="%.4f", label_visibility="collapsed", value=None, key=k_cal)
+                m_bar = c3.number_input(k_mon, format="%.4f", label_visibility="collapsed", value=None, key=k_mon)
+                dif_bar = f"{abs(m_bar - c_bar):.4f}" if c_bar is not None and m_bar is not None else ""
                 ok_bar = abs(m_bar - c_bar) < limite if dif_bar else None
                 c4.write(dif_bar or "-")
                 resultado(c5, ok_bar)
@@ -953,9 +953,9 @@ if es_particulas:
 
             c1, c2, c3, c4 = st.columns(pesos_pfs, vertical_alignment="top")
             c1.write("Lectura")
-            man_dif = c2.number_input("man_dif", label_visibility="collapsed", value=None, key="pfs_man")
-            mon_ini = c3.number_input("mon_ini", label_visibility="collapsed", value=None, key="pfs_mini")
-            mon_fin = c4.number_input("mon_fin", label_visibility="collapsed", value=None, key="pfs_mfin")
+            man_dif = c2.number_input("man_dif", format="%.4f", label_visibility="collapsed", value=None, key="pfs_man")
+            mon_ini = c3.number_input("mon_ini", format="%.4f", label_visibility="collapsed", value=None, key="pfs_mini")
+            mon_fin = c4.number_input("mon_fin", format="%.4f", label_visibility="collapsed", value=None, key="pfs_mfin")
 
             enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final"]
             tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin)], pesos_pfs)
@@ -968,8 +968,8 @@ if es_particulas:
 
                 c1, c2, c3, c4, c5 = st.columns(pesos_flujo, vertical_alignment="top")
                 c1.write("Lectura")
-                f_cal = c2.number_input("f_cal", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
-                f_mon = c3.number_input("f_mon", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
+                f_cal = c2.number_input("f_cal", format="%.4f", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
+                f_mon = c3.number_input("f_mon", format="%.4f", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
                 ok_flujo = None if f_mon is None else 16.00 <= f_mon <= 17.34
                 resultado(c5, ok_flujo)
 
@@ -998,8 +998,8 @@ if es_particulas:
             c1, c2, c3 = st.columns(pesos_verif)
             c1.write("**Calibrador (lpm)**"); c2.write("**Monitor (lpm)**"); c3.write("**Resultado**")
             c1, c2, c3 = st.columns(pesos_verif, vertical_alignment="top")
-            c1.number_input("Calibrador verificación", value=FLUJO_BAM_NOMINAL, disabled=True, label_visibility="collapsed", key=f"bam_fv_cal_{pm_tipo}")
-            verif_mon = c2.number_input("Monitor verificación", value=None, label_visibility="collapsed", key=f"bam_fv_mon_{pm_tipo}")
+            c1.number_input("Calibrador verificación", format="%.4f", value=FLUJO_BAM_NOMINAL, disabled=True, label_visibility="collapsed", key=f"bam_fv_cal_{pm_tipo}")
+            verif_mon = c2.number_input("Monitor verificación", format="%.4f", value=None, label_visibility="collapsed", key=f"bam_fv_mon_{pm_tipo}")
             cumple_verif = None if verif_mon is None else FLUJO_BAM_MIN <= verif_mon <= FLUJO_BAM_MAX
             with c3: evaluar_y_mostrar(verif_mon, FLUJO_BAM_MIN, FLUJO_BAM_MAX)
             tabla_pdf(S_SENS, "Verificación de flujo (lpm)", ["Calibrador (lpm)", "Monitor (lpm)", "Resultado"],
@@ -1025,8 +1025,8 @@ if es_particulas:
                 monitor_vals = []
                 for idx, target in enumerate(cal_targets):
                     c1, c2, c3 = st.columns(pesos_ajuste)
-                    c1.number_input(f"Target {idx}", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
-                    m_val = c2.number_input(f"Monitor {idx}", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
+                    c1.number_input(f"Target {idx}", format="%.4f", value=target, disabled=True, label_visibility="collapsed", key=f"bam_ft_{idx}_{pm_tipo}")
+                    m_val = c2.number_input(f"Monitor {idx}", format="%.4f", value=None, label_visibility="collapsed", key=f"bam_fm_{idx}_{pm_tipo}")
                     if m_val is not None: monitor_vals.append(m_val)
                     tabla_pdf(S_SENS, "Ajuste de flujo (lpm)", enc_ajuste, [Caja(target), Caja(m_val), ""], pesos_ajuste)
 
@@ -1036,9 +1036,9 @@ if es_particulas:
                 c1.write("**Promedio:**")
                 cumple_final_bam = None
                 if promedio_bam is not None:
-                    c2.write(f"**{promedio_bam:.2f}**")
+                    c2.write(f"**{promedio_bam:.4f}**")
                     with c3: cumple_final_bam = evaluar_y_mostrar(promedio_bam, FLUJO_BAM_MIN, FLUJO_BAM_MAX)
-                    tabla_pdf(S_SENS, "Ajuste de flujo (lpm)", enc_ajuste, [Neg("Promedio"), Neg(f"{promedio_bam:.2f}"), _res(cumple_final_bam)], pesos_ajuste)
+                    tabla_pdf(S_SENS, "Ajuste de flujo (lpm)", enc_ajuste, [Neg("Promedio"), Neg(f"{promedio_bam:.4f}"), _res(cumple_final_bam)], pesos_ajuste)
                 else:
                     c2.write("-")
                     c3.caption("Captura las tres lecturas del monitor.")
@@ -1122,7 +1122,7 @@ if es_particulas:
                 # Sin fecha ni coeficiente predeterminados: dependen del juego de foils y del equipo. Se capturan o se
                 # recuperan con el borrador de esta estación/equipo (botón Cargar).
                 st.date_input("Fecha de Certificación de Foils", value=None, key="cm_fecha", format="YYYY/MM/DD")
-                st.number_input("Mass Coefficient Inicial", value=None, key="cm_mass_ini", placeholder="Valor actual del equipo",
+                st.number_input("Mass Coefficient Inicial", format="%.4f", value=None, key="cm_mass_ini", placeholder="Valor actual del equipo",
                                 help="Es propio de cada equipo: captúralo de la pantalla del monitor o de su registro anterior.")
 
             st.markdown("---")
@@ -1134,12 +1134,12 @@ if es_particulas:
             c1, c2, c3 = st.columns(3)
             with c1: st.write("Calibración Cero")
             with c2: st.write("N/A")
-            with c3: st.number_input("Beta Cero", value=None, key="cm_beta_cero", label_visibility="collapsed")
+            with c3: st.number_input("Beta Cero", format="%.4f", value=None, key="cm_beta_cero", label_visibility="collapsed")
 
             c1, c2, c3 = st.columns(3)
             with c1: st.write("Calibración Span")
-            with c2: st.number_input("Span Ideal", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
-            with c3: st.number_input("Beta Span", value=None, key="cm_beta_span", label_visibility="collapsed")
+            with c2: st.number_input("Span Ideal", format="%.4f", value=1000.0, key="cm_span_ideal", label_visibility="collapsed")
+            with c3: st.number_input("Beta Span", format="%.4f", value=None, key="cm_beta_span", label_visibility="collapsed")
 
             for etiqueta, k in [("Equipo de calibración (foils)", "cm_eq"), ("Reference No. / Certificado", "cm_ref"),
                                 ("Fecha de certificación de foils", "cm_fecha"), ("Mass Coefficient inicial", "cm_mass_ini")]:
@@ -1185,14 +1185,14 @@ if es_gas:
             c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
             with c1: st.write("Flujo Estandar (scc/min)")
             with c2: st.write("-")
-            with c3: val_est = st.number_input("val_est", key=f"{key_prefix}_est", label_visibility="collapsed", value=None)
+            with c3: val_est = st.number_input("val_est", format="%.4f", key=f"{key_prefix}_est", label_visibility="collapsed", value=None)
             with c4: st.write("-")
             with c5: st.write("-")
 
             c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
             with c1: st.write("Flujo Volumétrico (cc/min)")
             with c2: st.write(str(flujo_ideal_vol))
-            with c3: val = st.number_input("val_vol", key=f"{key_prefix}_vol", label_visibility="collapsed", value=None)
+            with c3: val = st.number_input("val_vol", format="%.4f", key=f"{key_prefix}_vol", label_visibility="collapsed", value=None)
 
             resultado_cumple, desv_txt = None, ""
             if val is not None:
@@ -1376,20 +1376,20 @@ if es_gas:
             if gas_sel in ["Ozono (O3)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)"]:
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1: st.write("Ganancia")
-                with c2: st.number_input("ini", key="cs_g_i", label_visibility="collapsed", value=None)
-                with c3: st.number_input("fin", key="cs_g_f", label_visibility="collapsed", value=None)
+                with c2: st.number_input("ini", format="%.4f", key="cs_g_i", label_visibility="collapsed", value=None)
+                with c3: st.number_input("fin", format="%.4f", key="cs_g_f", label_visibility="collapsed", value=None)
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1: st.write("Zero Offset (ppb/ppm)")
-                with c2: st.number_input("ini", key="cs_z_i", label_visibility="collapsed", value=None)
-                with c3: st.number_input("fin", key="cs_z_f", label_visibility="collapsed", value=None)
+                with c2: st.number_input("ini", format="%.4f", key="cs_z_i", label_visibility="collapsed", value=None)
+                with c3: st.number_input("fin", format="%.4f", key="cs_z_f", label_visibility="collapsed", value=None)
                 for param, kp in [("Ganancia", "cs_g_"), ("Zero Offset (ppb/ppm)", "cs_z_")]:
                     tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
             else:
                 for param, kp in [("Ganancia NO", "cs_gn_"), ("Ganancia Aux (NOx)", "cs_gax_"), ("Zero Offset NO", "cs_zno_"), ("Zero Offset NO2", "cs_zno2_")]:
                     c1, c2, c3 = st.columns([2, 1, 1])
                     with c1: st.write(param)
-                    with c2: st.number_input("ini", key=f"{kp}i", label_visibility="collapsed", value=None)
-                    with c3: st.number_input("fin", key=f"{kp}f", label_visibility="collapsed", value=None)
+                    with c2: st.number_input("ini", format="%.4f", key=f"{kp}i", label_visibility="collapsed", value=None)
+                    with c3: st.number_input("fin", format="%.4f", key=f"{kp}f", label_visibility="collapsed", value=None)
                     tabla_pdf(S_CS, "", ["", "Inicial", "Final"], [param, Caja(st.session_state.get(f"{kp}i")), Caja(st.session_state.get(f"{kp}f"))], [2, 1, 1])
 
         with col_cs_der:
@@ -1397,7 +1397,7 @@ if es_gas:
             for gas, kp in [("Cero", "tr_c"), ("Span", "tr_s")]:
                 c1, c2, c3 = st.columns([1, 2, 1])
                 with c1: st.write(gas)
-                with c2: st.number_input("val", key=kp, label_visibility="collapsed", value=None)
+                with c2: st.number_input("val", format="%.4f", key=kp, label_visibility="collapsed", value=None)
                 with c3: st.write("min")
                 tabla_pdf(S_CS, "Tiempo de respuesta al suministrar gas", None, [gas, Caja(st.session_state.get(kp)), "min"], [1, 2, 1])
 
@@ -1408,7 +1408,7 @@ if es_gas:
             st.markdown("#### Concentración Cero")
             c1, c2, c3 = st.columns(3)
             val_cg_ideal = 0.0
-            with c1: val_cg = st.number_input("Cero Gen", value=val_cg_ideal, disabled=True, key="vcg")
+            with c1: val_cg = st.number_input("Cero Gen", format="%.4f", value=val_cg_ideal, disabled=True, key="vcg")
             with c2: resp_c = st.number_input("Resp Cero", value=None, format="%.4f", key="rac")
             with c3:
                 if resp_c is not None:
@@ -1419,7 +1419,7 @@ if es_gas:
         with col_cs_span:
             st.markdown("#### Concentración Span")
             c1, c2, c3 = st.columns(3)
-            with c1: val_sg = st.number_input("Span Gen", value=span_gen_default, disabled=True, key="vsg")
+            with c1: val_sg = st.number_input("Span Gen", format="%.4f", value=span_gen_default, disabled=True, key="vsg")
             with c2: resp_s = st.number_input("Resp Span", value=None, format="%.4f", key="ras")
             with c3:
                 if resp_s is not None and val_sg != 0:
@@ -1445,7 +1445,7 @@ if es_gas:
             x_vals, y_vals, desviaciones = [], [], []
             for i, cal_val in enumerate(puntos_multipunto):
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.number_input("cal", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
+                with c1: st.number_input("cal", format="%.4f", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
                 with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}_{gas_sel}", format="%.4f", label_visibility="collapsed")
                 with c3:
                     if ana_val is not None:
