@@ -97,7 +97,9 @@ def limpiar(valor):
     if valor is None:
         return ""
     if isinstance(valor, float):
-        valor = _numero(valor)
+        valor = f"{valor:.4f}"  # todas las cantidades con 4 decimales, como en la captura (p. ej. 0.4000)
+        if valor == "-0.0000":
+            valor = "0.0000"
     texto = str(valor).translate(_SUSTITUTOS)
     texto = "".join(c for c in texto if _imprimible(c))
     texto = re.sub(r"[ \t]+\n", "\n", texto)
