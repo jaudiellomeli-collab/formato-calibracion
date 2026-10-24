@@ -105,6 +105,9 @@ def error_google(e):
 # BORRADORES: SERIALIZACIÓN Y LIMPIEZA DEL FORMULARIO
 # ==========================================
 CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
+# Diagnóstico de equipos que están fuera de estación (descompuestos, en laboratorio). Por ahora solo PM Thermo.
+TIPO_DIAG = "Diagnóstico de equipo (sin estación)"
+EQUIPOS_DIAG = ["PM Thermo"]
 CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
 PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_", "quitar_")  # las fotos y sus descripciones se guardan aparte, en "fotos"
 VERSION_BORRADOR = 2
@@ -326,14 +329,20 @@ v_tipo = st.session_state.get('k_tipo', 'Selecciona una opción...')
 v_est = st.session_state.get('k_est', 'Selecciona una opción...')
 v_gas = st.session_state.get('k_gas', 'Ozono (O3)')
 v_pm = st.session_state.get('k_pm', 'N/A')
-vista_actual = f"{v_tipo}_{v_est}_{v_gas}_{v_pm}"
+# en un diagnóstico el equipo no tiene estación: el borrador se identifica por su número de serie
+es_diag_vista = v_tipo == TIPO_DIAG
+v_id = (st.session_state.get("dx_ns") or "").strip() if es_diag_vista else v_est
+falta_id = not v_id if es_diag_vista else v_est == "Selecciona una opción..."
+v_donde = f"el equipo N/S {v_id}" if es_diag_vista else v_est
+aviso_id = "Escribe el N/S del equipo en la ventana principal primero." if es_diag_vista else "Selecciona una Estación en la ventana principal primero."
+vista_actual = f"{v_tipo}_{v_id}_{v_gas}_{v_pm}"
 
 col_btn1, col_btn2 = st.sidebar.columns(2)
 if col_btn1.button("📥 Guardar", use_container_width=True):
     if not correo_borrador:
         st.sidebar.error("Ingresa un correo.")
-    elif v_est == "Selecciona una opción...":
-        st.sidebar.error("Selecciona una Estación en la ventana principal primero.")
+    elif falta_id:
+        st.sidebar.error(aviso_id)
     elif secrets_faltantes():
         st.sidebar.error("Faltan credenciales de Google en Secrets.")
     else:
@@ -342,15 +351,15 @@ if col_btn1.button("📥 Guardar", use_container_width=True):
                 fotos_guardadas, invalidas = guardar_borrador(correo_borrador.strip(), vista_actual)
             avisar_invalidas(invalidas)
             total_fotos = sum(len(l) for l in fotos_guardadas.values())
-            st.sidebar.success(f"✅ Guardado: {v_gas} en {v_est}" + (f", con {total_fotos} foto(s)." if total_fotos else "."))
+            st.sidebar.success(f"✅ Guardado: {v_gas} en {v_donde}" + (f", con {total_fotos} foto(s)." if total_fotos else "."))
         except Exception as e:
             st.sidebar.error(f"Error al guardar: {error_google(e)}")
 
 if col_btn2.button("📤 Cargar", use_container_width=True):
     if not correo_borrador:
         st.sidebar.error("Ingresa un correo.")
-    elif v_est == "Selecciona una opción...":
-        st.sidebar.error("Selecciona la Estación y Equipo a cargar en la ventana principal.")
+    elif falta_id:
+        st.sidebar.error(aviso_id)
     elif secrets_faltantes():
         st.sidebar.error("Faltan credenciales de Google en Secrets.")
     else:
@@ -370,11 +379,11 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
                 reiniciar_fotos(vista.get("fotos", {}) if "__version__" in vista else {})
                 st.rerun()
             else:
-                st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_est}.")
+                st.sidebar.warning(f"No hay datos guardados para {v_gas} en {v_donde}.")
 
 # Guardado automático: al subir, quitar o describir una foto se guarda el borrador (con sus fotos) sin pulsar Guardar,
 # para que no se pierdan si se recarga la página o se cierra la sesión. Tras un error espera un minuto antes de reintentar.
-puede_autoguardar = bool((correo_borrador or "").strip()) and v_est != "Selecciona una opción..." and not secrets_faltantes()
+puede_autoguardar = bool((correo_borrador or "").strip()) and not falta_id and not secrets_faltantes()
 if puede_autoguardar and time.time() - st.session_state.get("_fallo_autoguardado", 0) > 60 and hay_cambios_en_fotos():
     try:
         with st.spinner("Guardando fotos en tu borrador..."):
@@ -402,26 +411,32 @@ st.write("<br>", unsafe_allow_html=True)
 # Los selectores van en contenedores con clave para ocultarlos al imprimir y mostrar en su lugar un resumen legible
 with st.container(key="selector_servicio"):
     st.markdown("#### Selecciona el Tipo de Servicio:")
-    tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo"], horizontal=True,
+    tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo", TIPO_DIAG], horizontal=True,
                              key="k_tipo", label_visibility="collapsed", on_change=limpiar_formulario)
     es_externo = (tipo_servicio == "Mantenimiento Externo")
+    es_diagnostico = (tipo_servicio == TIPO_DIAG)
 
     if tipo_servicio == "Selecciona una opción...":
         st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
         st.stop()
 
-    # Quién realiza el mantenimiento externo (obligatorio); se agrega al nombre del archivo y al asunto del correo
-    if es_externo:
-        quien_externo = st.radio("¿Quién realiza el mantenimiento?", ["Selecciona una opción...", "Proveedor", "SIMAJ"], horizontal=True, key="k_quien")
+    # Quién realiza el mantenimiento externo o el diagnóstico (obligatorio); se agrega al nombre del archivo y al asunto del correo
+    if es_externo or es_diagnostico:
+        trabajo = "el diagnóstico" if es_diagnostico else "el mantenimiento"
+        quien_externo = st.radio(f"¿Quién realiza {trabajo}?", ["Selecciona una opción...", "Proveedor", "SIMAJ"], horizontal=True, key="k_quien")
         if quien_externo == "Selecciona una opción...":
-            st.warning("⚠️ Selecciona si el mantenimiento lo realiza un Proveedor o SIMAJ para habilitar el formato.")
+            st.warning(f"⚠️ Selecciona si {trabajo} lo realiza un Proveedor o SIMAJ para habilitar el formato.")
             st.stop()
         origen_archivo = "PROV" if quien_externo == "Proveedor" else "SIMAJ"
     else:
         quien_externo = "SIMAJ"
         origen_archivo = "SIMAJ"
     st.caption("Cambiar el tipo de servicio, el equipo o el parámetro inicia un formato nuevo. Guarda tu avance antes de cambiar.")
-es_proveedor = es_externo and quien_externo == "Proveedor"
+es_proveedor = (es_externo or es_diagnostico) and quien_externo == "Proveedor"
+# fotos de evidencia: en mantenimiento externo y en diagnóstico
+con_fotos = es_externo or es_diagnostico
+# datos predeterminados de SIMAJ (calibradores, técnico, revisor): no se llenan cuando el trabajo es externo o de un proveedor
+sin_predeterminados = es_externo or es_proveedor
 
 st.divider()
 
@@ -431,14 +446,17 @@ with col_logo:
     else: st.markdown("<h1 style='color:#00B2A9;'>SIMAJ</h1>", unsafe_allow_html=True)
 
 with col_menu, st.container(key="selector_equipo"):
-    st.markdown("#### Selecciona el Equipo a Calibrar:")
-    gas_sel = st.radio("Selecciona el Equipo:", ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"],
+    opciones_equipo = EQUIPOS_DIAG if es_diagnostico else ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"]
+    if st.session_state.get("k_gas") not in opciones_equipo:
+        st.session_state["k_gas"] = opciones_equipo[0]
+    st.markdown("#### Selecciona el Equipo a Diagnosticar:" if es_diagnostico else "#### Selecciona el Equipo a Calibrar:")
+    gas_sel = st.radio("Selecciona el Equipo:", opciones_equipo,
                        horizontal=True, label_visibility="collapsed", key="k_gas", on_change=limpiar_formulario)
     pm_tipo = "N/A"
     if gas_sel in ["PM BAM", "PM Thermo"]:
         pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm", on_change=limpiar_formulario)
 
-texto_servicio = tipo_servicio + (f" (realizado por: {quien_externo})" if es_externo else "")
+texto_servicio = tipo_servicio + (f" (realizado por: {quien_externo})" if es_externo or es_diagnostico else "")
 texto_equipo = gas_sel if pm_tipo == "N/A" else f"{gas_sel} ({pm_tipo})"
 st.markdown(f"<div class='resumen-servicio'><b>Tipo de servicio:</b> {texto_servicio} &nbsp;|&nbsp; <b>Equipo:</b> {texto_equipo}</div>", unsafe_allow_html=True)
 
@@ -469,32 +487,38 @@ elif es_bam or es_thermo:
     modelo_analizador = "BAM 1020" if es_bam else "5014i"
 
 # Valores por defecto para mantenimiento externo
-fab_cal1_def = "" if es_externo else "Bios International Corp"
-mod_cal1_def = "" if es_externo else "Definer 220 M"
-lab_cal1_def = "" if es_externo else "COMEXSA"
-tec_cal1_def = "" if es_externo else "Lizeth Morales"
-cert_cal1_def = "" if es_externo else "E13496529 Flujo"
-fab_cal2_def = "" if es_externo else "ACOEM"
-mod_cal2_def = "" if es_externo else "Serinus Cal 3000"
-lab_cal2_def = "" if es_externo else "INECC"
-tec_cal2_def = "" if es_externo else "Humberto Bustamante"
+fab_cal1_def = "" if sin_predeterminados else "Bios International Corp"
+mod_cal1_def = "" if sin_predeterminados else "Definer 220 M"
+lab_cal1_def = "" if sin_predeterminados else "COMEXSA"
+tec_cal1_def = "" if sin_predeterminados else "Lizeth Morales"
+cert_cal1_def = "" if sin_predeterminados else "E13496529 Flujo"
+fab_cal2_def = "" if sin_predeterminados else "ACOEM"
+mod_cal2_def = "" if sin_predeterminados else "Serinus Cal 3000"
+lab_cal2_def = "" if sin_predeterminados else "INECC"
+tec_cal2_def = "" if sin_predeterminados else "Humberto Bustamante"
 
-tec_empresa_def = "" if es_externo else "Secretaría de Medio Ambiente y Desarrollo Territorial"
-tec_nombre_def = "" if es_externo else "Jaudiel Alejandro Jaime Lomelí"
-sup_nombre_def = "" if es_externo else "Beatriz Rodriguez Perez"
-sup_empresa_def = "" if es_externo else "Desarrollo Territorial"
+tec_empresa_def = "" if sin_predeterminados else "Secretaría de Medio Ambiente y Desarrollo Territorial"
+tec_nombre_def = "" if sin_predeterminados else "Jaudiel Alejandro Jaime Lomelí"
+sup_nombre_def = "" if sin_predeterminados else "Beatriz Rodriguez Perez"
+sup_empresa_def = "" if sin_predeterminados else "Desarrollo Territorial"
 # Las fechas de certificado corresponden a los calibradores de SIMAJ; en mantenimiento externo se capturan
-fecha_cal_pm_def = None if es_externo else datetime.date(2026, 1, 20)
-fecha_cal1_def = None if es_externo else datetime.date(2026, 6, 20)
-fecha_cal2_def = None if es_externo else datetime.date(2026, 8, 8)
+fecha_cal_pm_def = None if sin_predeterminados else datetime.date(2026, 1, 20)
+fecha_cal1_def = None if sin_predeterminados else datetime.date(2026, 6, 20)
+fecha_cal2_def = None if sin_predeterminados else datetime.date(2026, 8, 8)
 # Solo un proveedor externo lleva "empresa"; si el servicio lo hace SIMAJ el dato es la institución
 etq_empresa_tec = "Empresa proveedora" if es_proveedor else "Institución"
 
 # ==========================================
 # ENCABEZADO
 # ==========================================
-st.title(f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})")
-st.subheader("Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas"))
+if es_diagnostico:
+    titulo_formato = f"FORMATO DE DIAGNÓSTICO {gas_sel} ({pm_tipo})"
+    subtitulo_formato = "Diagnóstico de equipo fuera de estación - Monitor de Partículas"
+else:
+    titulo_formato = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
+    subtitulo_formato = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
+st.title(titulo_formato)
+st.subheader(subtitulo_formato)
 
 # ==========================================
 # FUNCIONES AUXILIARES GLOBALES
@@ -511,12 +535,18 @@ S_CS = "Verificación cero-span"
 S_MUL = "Calibración multipunto"
 S_DET = "Revisión detallada de componentes"
 S_RES = "Resumen y firmas finales"
+S_DXF = "Falla reportada y diagnóstico"
+S_PRU = "Pruebas realizadas para detectar el problema"
+S_DXR = "Resultado del diagnóstico"
 
-ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_LIM]
-if es_externo: ORDEN_PDF.append(S_DET)
-ORDEN_PDF.extend([S_CAL, S_CS, S_MUL])
-if not es_externo: ORDEN_PDF.append(S_DET)
-ORDEN_PDF.append(S_RES)
+if es_diagnostico:
+    ORDEN_PDF = [S_DAT, S_DXF, S_PG, S_SENS, S_MAS, S_PRU, S_LIM, S_DET, S_DXR, S_RES]
+else:
+    ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_LIM]
+    if es_externo: ORDEN_PDF.append(S_DET)
+    ORDEN_PDF.extend([S_CAL, S_CS, S_MUL])
+    if not es_externo: ORDEN_PDF.append(S_DET)
+    ORDEN_PDF.append(S_RES)
 
 pdf_secciones = {}
 pdf_ctx = {"sec": "", "sub": ""}
@@ -657,10 +687,19 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
     col_izq, col_der = st.columns([1, 1.2])
     with col_izq:
         kv(S_DAT, "Tipo de servicio", texto_servicio)
-        estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
-        if st.session_state.get("k_est") not in estaciones:  # p. ej. al cambiar a un equipo que no existe en esa estación
-            st.session_state["k_est"] = estaciones[0]
-        estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones, key="k_est"))
+        if es_diagnostico:
+            # el equipo está fuera de estación: se identifica por su número de serie
+            estacion_sel = "Sin estación"
+            num_serie_val = st.text_input("N/S del equipo *", key="dx_ns", placeholder="Ej. 5014i203241211").strip()
+            kv(S_DAT, "N/S del equipo", num_serie_val)
+            kv(S_DAT, "Ubicación actual del equipo", st.text_input("Ubicación actual del equipo", key="dx_ubic", placeholder="Ej. Laboratorio SIMAJ"))
+            todas_estaciones = sorted(set().union(*[d.keys() for d in (equipos_o3, equipos_nox, equipos_co, equipos_so2, equipos_pm10, equipos_pm25)]))
+            kv(S_DAT, "Estación de procedencia", st.selectbox("Estación de procedencia (si aplica)", ["No aplica"] + todas_estaciones, key="dx_est_origen"))
+        else:
+            estaciones = ["Selecciona una opción..."] + list(equipos_act.keys())
+            if st.session_state.get("k_est") not in estaciones:  # p. ej. al cambiar a un equipo que no existe en esa estación
+                st.session_state["k_est"] = estaciones[0]
+            estacion_sel = kv(S_DAT, "Estación:", st.selectbox("Estación:", estaciones, key="k_est"))
         
         fab_final = "ACOEM" if es_gas else ("Met One" if es_bam else "Thermo Fisher")
         mod_final = modelo_analizador
@@ -673,9 +712,10 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         mod_capturado = st.text_input("Modelo", value=mod_final)
         kv(S_DAT, "Modelo", mod_capturado)
         
-        num_serie_val = equipos_act.get(estacion_sel, "")
-        ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
-        kv(S_DAT, "N/S (Automático)", ns_capturado)
+        if not es_diagnostico:
+            num_serie_val = equipos_act.get(estacion_sel, "")
+            ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
+            kv(S_DAT, "N/S (Automático)", ns_capturado)
         
         kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", format="%.4f", value=634.0, key="presion_unica"))
         
@@ -716,7 +756,7 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
 # ==========================================
 req_basico = req_cs = req_comp = True
-if not es_externo:
+if not es_externo and not es_diagnostico:
     with st.expander("📅 HISTÓRICO DE MANTENIMIENTOS", expanded=True):
         h1, h2, h3, h4 = st.columns([2, 1.5, 1, 1.5])
         with h1: st.write("**Mantenimiento**")
@@ -741,8 +781,23 @@ if not es_externo:
         req_cs = fila_historico("Verificación Cero-Span", "cero_span", datetime.date(2026, 1, 1), 3)
         req_comp = fila_historico("Mantenimiento Completo", "completo", datetime.date(2025, 1, 1), 6)
 
-if es_gas: nomenclatura_tipo = "CM" if req_comp else ("CS" if req_cs else "VA")
+if es_diagnostico: nomenclatura_tipo = "DX"
+elif es_gas: nomenclatura_tipo = "CM" if req_comp else ("CS" if req_cs else "VA")
 else: nomenclatura_tipo = "CM" if req_comp else "VC"
+
+# ==========================================
+# DIAGNÓSTICO: FALLA REPORTADA Y ENCONTRADA
+# ==========================================
+if es_diagnostico:
+    with st.expander("🩺 FALLA REPORTADA Y DIAGNÓSTICO", expanded=True):
+        for etiqueta, k, ph in [("Falla reportada *", "dx_falla_rep", "¿Qué problema se reportó? Ej. no registra datos, alarma de flujo, error de comunicación..."),
+                                ("Falla encontrada / síntomas observados *", "dx_falla_enc", "Lo que se observó al revisar el equipo..."),
+                                ("Causa probable", "dx_causa", "Causa más probable según las pruebas realizadas...")]:
+            st.markdown(f"**{etiqueta}**")
+            valor = st.text_area(etiqueta, key=k, placeholder=ph, label_visibility="collapsed", height="content")
+            _sec(S_DXF)["textos"].append((etiqueta.rstrip(" *"), valor, ""))
+        st.divider()
+        renderizar_fotos_seccion(S_DXF, "📷 Evidencia de la falla", "fot_dxf", multiple=True)
 
 # ==========================================
 # 3. PARÁMETROS GENERALES
@@ -865,14 +920,14 @@ if es_particulas:
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Calibrador (Sensores y Flujo)**")
-            st.text_input("Marca", value="Mesa Labs" if not es_externo else "", key="pm_cal_mca")
-            st.text_input("Modelo", value="DeltaCal DC1" if not es_externo else "", key="pm_cal_mod")
-            st.text_input("N/S", value="152892" if not es_externo else "", key="pm_cal_ns")
+            st.text_input("Marca", value="Mesa Labs" if not sin_predeterminados else "", key="pm_cal_mca")
+            st.text_input("Modelo", value="DeltaCal DC1" if not sin_predeterminados else "", key="pm_cal_mod")
+            st.text_input("N/S", value="152892" if not sin_predeterminados else "", key="pm_cal_ns")
         with col_c2:
             st.markdown("**Certificación**")
-            st.text_input("Laboratorio", value="Comexsa" if not es_externo else "", key="pm_cal_lab")
+            st.text_input("Laboratorio", value="Comexsa" if not sin_predeterminados else "", key="pm_cal_lab")
             st.date_input("Fecha de calibración/certificado", fecha_cal_pm_def, key="pm_cal_fecha")
-            st.text_input("No de certificado", value="E252677468" if not es_externo else "", key="pm_cal_cert")
+            st.text_input("No de certificado", value="E252677468" if not sin_predeterminados else "", key="pm_cal_cert")
         for etiqueta, k, grupo in [("Marca", "pm_cal_mca", "Calibrador (Sensores y Flujo)"), ("Modelo", "pm_cal_mod", "Calibrador (Sensores y Flujo)"),
                                    ("N/S", "pm_cal_ns", "Calibrador (Sensores y Flujo)"), ("Laboratorio", "pm_cal_lab", "Certificación"),
                                    ("Fecha de calibración/certificado", "pm_cal_fecha", "Certificación"), ("No de certificado", "pm_cal_cert", "Certificación")]:
@@ -1055,7 +1110,7 @@ if es_particulas:
                 nota_pdf(S_SENS, f"Resultado final del flujo: {texto_final}")
             nota_pdf(S_SENS, "El valor del flujo debe ser 16.67 ±0.67 lpm")
 
-        if es_externo:
+        if con_fotos:
             st.divider()
             renderizar_fotos_seccion(S_SENS, "📷 Evidencias de Sensores y Flujo", "fot_sens", multiple=True)
 
@@ -1148,7 +1203,7 @@ if es_particulas:
             tabla_pdf(S_MAS, "", enc_masas, ["Calibración Cero", "N/A", Caja(st.session_state.get("cm_beta_cero"))])
             tabla_pdf(S_MAS, "", enc_masas, ["Calibración Span", Caja(st.session_state.get("cm_span_ideal")), Caja(st.session_state.get("cm_beta_span"))])
 
-        if es_externo:
+        if con_fotos:
             st.divider()
             renderizar_fotos_seccion(S_MAS, "📷 Evidencia de Calibración de Masas", "fot_mas", multiple=True)
 
@@ -1250,7 +1305,7 @@ def bloque_revision_detallada():
     with st.expander("🔍 REVISIÓN DETALLADA DE COMPONENTES", expanded=req_comp):
         pdf_ctx["sec"], pdf_ctx["sub"] = S_DET, ""
         
-        if es_externo:
+        if con_fotos:
             renderizar_fotos_seccion(S_DET, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
 
@@ -1279,6 +1334,38 @@ def bloque_revision_detallada():
             fila_comp("Sistema neumático y O-rings", "d_orings_pm")
 
 # ==========================================
+# DIAGNÓSTICO: PRUEBAS REALIZADAS PARA DETECTAR EL PROBLEMA
+# ==========================================
+def agregar_prueba():
+    st.session_state["dx_n_pruebas"] = st.session_state.get("dx_n_pruebas", 3) + 1
+
+if es_diagnostico:
+    with st.expander("🧪 PRUEBAS REALIZADAS PARA DETECTAR EL PROBLEMA", expanded=True):
+        st.caption("Registra cada prueba que hiciste y lo que obtuviste. Ejemplos: prueba de fugas, voltajes de la fuente, "
+                   "vacío de la bomba, comunicación, lecturas de sensores, conteos beta.")
+        pesos_pru = [2, 2, 1.1, 2.4]
+        enc_pru = ["Prueba realizada", "Resultado obtenido", "Estado", "Observaciones"]
+        c1, c2, c3, c4 = st.columns(pesos_pru)
+        c1.write("**Prueba realizada**"); c2.write("**Resultado obtenido**"); c3.write("**Estado**"); c4.write("**Observaciones**")
+        filas_pdf = 0
+        for i in range(st.session_state.get("dx_n_pruebas", 3)):
+            c1, c2, c3, c4 = st.columns(pesos_pru, vertical_alignment="top")
+            nombre_pr = c1.text_input("Prueba", key=f"dx_pr_{i}_nom", label_visibility="collapsed", placeholder="Ej. Prueba de fugas" if i == 0 else "")
+            res_pr = c2.text_input("Resultado", key=f"dx_pr_{i}_res", label_visibility="collapsed", placeholder="Ej. 2 mmHg en 5 min" if i == 0 else "")
+            est_pr = c3.selectbox("Estado", ["-", "Normal", "Anormal"], key=f"dx_pr_{i}_est", label_visibility="collapsed",
+                                  format_func=lambda v: {"Normal": "Normal 🟢", "Anormal": "Anormal 🔴"}.get(v, v))
+            obs_pr = c4.text_area("Observaciones", key=f"dx_pr_{i}_obs", label_visibility="collapsed", height="content")
+            if (nombre_pr or "").strip() or (res_pr or "").strip() or est_pr != "-" or (obs_pr or "").strip():
+                estado_pdf = Alerta(est_pr, est_pr == "Normal") if est_pr != "-" else Caja("")
+                tabla_pdf(S_PRU, "", enc_pru, [Caja(nombre_pr), Caja(res_pr), estado_pdf, Caja(obs_pr)], pesos_pru)
+                filas_pdf += 1
+        st.button("➕ Agregar otra prueba", on_click=agregar_prueba)
+        if not filas_pdf:
+            nota_pdf(S_PRU, "No se registraron pruebas.")
+        st.divider()
+        renderizar_fotos_seccion(S_PRU, "📷 Evidencias de las pruebas", "fot_pru", multiple=True)
+
+# ==========================================
 # 6. LIMPIEZA, REVISIÓN Y REEMPLAZO
 # ==========================================
 with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
@@ -1305,7 +1392,7 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
             fila_comp("Lámpara UV", "b_lamp_so2")
     
     elif es_bam:
-        if es_externo:
+        if con_fotos:
             renderizar_fotos_seccion(S_LIM, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
         encabezado_componentes()
@@ -1435,7 +1522,7 @@ if es_gas:
                   [Caja(val_sg), Caja(resp_s), f"{desv_s * 100:.2f}%" if desv_s is not None else "",
                    _res(-0.03 <= desv_s <= 0.03 if desv_s is not None else None)])
                    
-        if es_externo:
+        if con_fotos:
             st.divider()
             renderizar_fotos_seccion(S_CS, "📷 Evidencia de Cero-Span", "fot_cs", multiple=False, desc_default="Pantalla Cero-Span")
 
@@ -1534,13 +1621,34 @@ if es_gas:
             # La gráfica del PDF se dibuja con reportlab a partir de los mismos datos (no depende de kaleido ni de un navegador)
             _sec(S_MUL)["regresion"] = {"x": list(x_vals), "y": list(y_vals), "m": float(m), "b": float(b)}
 
-        if es_externo:
+        if con_fotos:
             st.divider()
             renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if not es_externo and not es_bam:
     bloque_revision_detallada()
+
+# ==========================================
+# DIAGNÓSTICO: RESULTADO
+# ==========================================
+OPC_FUNCIONA = ["Selecciona una opción...", "Sí", "No", "Parcialmente"]
+if es_diagnostico:
+    with st.expander("✅ RESULTADO DEL DIAGNÓSTICO", expanded=True):
+        st.markdown("**¿El equipo queda funcionando? \\***")
+        funciona = st.radio("¿El equipo queda funcionando?", OPC_FUNCIONA, horizontal=True, key="dx_funciona", label_visibility="collapsed")
+        if funciona == "Sí": st.success("El equipo queda funcionando ✅")
+        elif funciona == "No": st.error("El equipo NO queda funcionando ❌")
+        elif funciona == "Parcialmente": st.warning("El equipo queda funcionando parcialmente ⚠️")
+        st.markdown("**Motivo / justificación \\***")
+        motivo = st.text_area("Motivo", key="dx_motivo", label_visibility="collapsed", height="content",
+                              placeholder="Explica por qué el equipo queda (o no) funcionando y en qué condiciones...")
+        st.markdown("**Refacciones o acciones requeridas**")
+        refacciones = st.text_area("Refacciones", key="dx_refacc", label_visibility="collapsed", height="content",
+                                   placeholder="Piezas a reemplazar, número de parte, servicio pendiente...")
+        kv(S_DXR, "¿El equipo queda funcionando?",
+           Alerta(funciona, funciona == "Sí") if funciona in ("Sí", "No", "Parcialmente") else "")
+        _sec(S_DXR)["textos_final"] += [("Motivo / justificación", motivo, ""), ("Refacciones o acciones requeridas", refacciones, "")]
 
 # ==========================================
 # 10. RESUMEN Y FIRMAS
@@ -1563,8 +1671,8 @@ with st.expander("✍ RESUMEN Y FIRMAS FINALES", expanded=True):
 
     with c2:
         st.markdown("<div class='header-firma'>Supervisado / Revisado por</div>", unsafe_allow_html=True)
-        st.text_input("Institución", value="SEMADET", disabled=es_externo, key="e_sup")
-        st.text_input("Nombre", value=sup_nombre_def if not es_externo else "", key="n_sup")
+        st.text_input("Institución", value="SEMADET", disabled=sin_predeterminados, key="e_sup")
+        st.text_input("Nombre", value=sup_nombre_def if not sin_predeterminados else "", key="n_sup")
         st.date_input("Fecha", datetime.date.today(), key="f_sup")
         st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
 
@@ -1594,8 +1702,7 @@ def preparar_resumen():
 
 preparar_resumen()
 # Fotografía de los datos de esta ejecución: el PDF descargado y el enviado se construyen con exactamente lo mismo
-_titulo_pdf = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
-_subtitulo_pdf = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
+_titulo_pdf, _subtitulo_pdf = titulo_formato, subtitulo_formato
 _logo_pdf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png")
 _secciones_pdf = [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones]
 
@@ -1624,6 +1731,8 @@ def nombre_base_archivo():
 
     # estaciones sin número de serie registrado: se marca en lugar de dejar un segmento vacío ("__")
     serie = _segmento_archivo(num_serie_val, "SIN-NS")
+    if es_diagnostico:  # sin estación: fecha, DX, equipo y número de serie
+        return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{serie}_{origen_archivo}"
     return f"{año_f}.{mes_f}.{dia_f}_{nomenclatura_tipo}_{gas_cod}_{est_cod}_{serie}_{origen_archivo}"
 
 def nombre_pdf(): return f"{nombre_base_archivo()}.pdf"
@@ -1631,13 +1740,18 @@ def nombre_pdf(): return f"{nombre_base_archivo()}.pdf"
 # Campos que deben estar llenos para descargar o enviar el formato (no se aceptan solo espacios)
 CAMPOS_OBLIGATORIOS = [("n_tec", "Nombre del Técnico / Operador"), ("n_sup", "Nombre de quien supervisa / revisa"),
                        ("n_sema", "Nombre del Supervisor SEMADET"), ("res_obs", "Observaciones Generales"), ("res_conc", "Conclusiones")]
+if es_diagnostico:
+    CAMPOS_OBLIGATORIOS = [("dx_ns", "N/S del equipo"), ("dx_falla_rep", "Falla reportada"), ("dx_falla_enc", "Falla encontrada"),
+                           ("dx_motivo", "Motivo del resultado del diagnóstico")] + CAMPOS_OBLIGATORIOS
 faltantes = [etiqueta for k, etiqueta in CAMPOS_OBLIGATORIOS if not str(st.session_state.get(k) or "").strip()]
+if es_diagnostico and st.session_state.get("dx_funciona") not in OPC_FUNCIONA[1:]:
+    faltantes.insert(4, "¿El equipo queda funcionando?")
 sin_estacion = estacion_sel == "Selecciona una opción..."
 bloqueado = sin_estacion or bool(faltantes)
 motivo_bloqueo = ("Selecciona la Estación para habilitar la descarga" if sin_estacion
                   else "Completa: " + ", ".join(faltantes) if faltantes else None)
 if faltantes and not sin_estacion:
-    st.warning("⚠️ Para descargar o enviar el formato completa en **Resumen y firmas finales**:\n\n"
+    st.warning("⚠️ Para descargar o enviar el formato completa:\n\n"
                + "\n".join(f"- {f}" for f in faltantes))
 
 col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
@@ -1696,7 +1810,7 @@ with col_drive:
                 try:
                     servicio_drive = build("drive", "v3", credentials=credenciales_google())
                     # cada reporte va a su carpeta Estación/Equipo dentro de la carpeta principal
-                    ruta_drive = [estacion_sel, codigo_equipo()]
+                    ruta_drive = ["Diagnósticos", codigo_equipo()] if es_diagnostico else [estacion_sel, codigo_equipo()]
                     carpeta_reporte = carpeta_drive(servicio_drive, st.secrets["drive_carpeta_id"], ruta_drive)
                     pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta_reporte)
                     enlace = pdf_subido.get("webViewLink", "")
@@ -1707,12 +1821,15 @@ with col_drive:
                 try:
                     servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
                     gas_txt = gas_sel if es_gas else f"{gas_sel} ({pm_tipo})"
-                    cuerpo = (f"Buen día,\n\nSe adjunta el formato de calibración de {gas_txt} de la estación {estacion_sel}, "
+                    que = (f"el formato de diagnóstico del equipo {gas_txt} con N/S {num_serie_val}" if es_diagnostico
+                           else f"el formato de calibración de {gas_txt} de la estación {estacion_sel}")
+                    cuerpo = (f"Buen día,\n\nSe adjunta {que}, "
                               f"con fecha de servicio {fecha_ref}.\n"
                               + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
                               + "\nSaludos.")
                     enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
-                                  f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref} - {origen_archivo}", cuerpo,
+                                  (f"Diagnóstico de equipo {gas_txt} - N/S {num_serie_val} - {fecha_ref} - {origen_archivo}" if es_diagnostico
+                                   else f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref} - {origen_archivo}"), cuerpo,
                                   [(nombre_del_pdf, pdf_bytes, "application/pdf")])
                     st.success("✅ Correo enviado al coordinador.")
                 except Exception as e:
