@@ -9,6 +9,7 @@ import base64
 import json
 import re
 import hashlib
+import hmac
 import time
 from PIL import Image, ImageOps
 import streamlit.components.v1 as components
@@ -17,6 +18,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from pdf_formato import construir_pdf, Caja, Alerta, Neg
+import asistente
 
 _favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.png")  # "si" del logo SIMAJ
 st.set_page_config(layout="wide", page_title="Calibración SIMAJ", page_icon=_favicon if os.path.exists(_favicon) else None)
@@ -395,6 +397,240 @@ if puede_autoguardar and time.time() - st.session_state.get("_fallo_autoguardado
         st.sidebar.warning(f"No se pudieron guardar las fotos automáticamente ({error_google(e)}). Pulsa 📥 Guardar para intentarlo de nuevo.")
 
 # ==========================================
+# ASISTENTE DE DUDAS (SISTEMA EXPERTO) Y PANEL DE COORDINACIÓN
+# ==========================================
+CARPETA_ASISTENTE = "Asistente"
+ARCHIVO_CONOCIMIENTO = "conocimiento.json"  # lo que la coordinación agrega, edita o elimina de la base del asistente
+ARCHIVO_PENDIENTES = "preguntas_pendientes.json"  # preguntas que el asistente no supo responder
+CARPETAS_NO_REPORTES = {CARPETA_BORRADORES, CARPETA_ASISTENTE}
+
+def leer_json_drive(servicio, nombre, vacio):
+    """(id, contenido) de un JSON de la carpeta Asistente; (None, vacio) si todavía no existe."""
+    carpeta = carpeta_drive(servicio, st.secrets["drive_carpeta_id"], [CARPETA_ASISTENTE])
+    res = servicio.files().list(q=f"name='{_q(nombre)}' and '{carpeta}' in parents and trashed=false",
+                                fields="files(id)").execute(num_retries=3).get("files", [])
+    if not res:
+        return None, vacio
+    return res[0]["id"], json.loads(servicio.files().get_media(fileId=res[0]["id"]).execute(num_retries=3).decode("utf-8"))
+
+def escribir_json_drive(servicio, nombre, contenido, archivo_id):
+    media = MediaIoBaseUpload(io.BytesIO(json.dumps(contenido, ensure_ascii=False).encode("utf-8")), mimetype="application/json")
+    if archivo_id:
+        servicio.files().update(fileId=archivo_id, media_body=media).execute(num_retries=3)
+    else:
+        carpeta = carpeta_drive(servicio, st.secrets["drive_carpeta_id"], [CARPETA_ASISTENTE])
+        servicio.files().create(body={"name": nombre, "parents": [carpeta]}, media_body=media).execute(num_retries=3)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def conocimiento_drive():
+    try:
+        return leer_json_drive(build("drive", "v3", credentials=credenciales_google()), ARCHIVO_CONOCIMIENTO, {})[1]
+    except Exception:
+        return {}  # sin Drive el asistente sigue respondiendo con la base inicial
+
+def base_asistente():
+    return asistente.combinar_base({} if secrets_faltantes() else conocimiento_drive())
+
+def registrar_pendiente(pregunta, motivo, respuesta_mostrada=""):
+    """Guarda en Drive una pregunta que el asistente no resolvió, para que la coordinación la conteste."""
+    if secrets_faltantes():
+        return False
+    try:
+        servicio = build("drive", "v3", credentials=credenciales_google())
+        archivo_id, pendientes = leer_json_drive(servicio, ARCHIVO_PENDIENTES, [])
+        if any(asistente.normalizar(p["pregunta"]) == asistente.normalizar(pregunta) for p in pendientes):
+            return True  # ya estaba registrada
+        pendientes.append({"pregunta": pregunta.strip(), "motivo": motivo, "respuesta_mostrada": respuesta_mostrada,
+                           "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                           "correo": (st.session_state.get("correo_borrador") or "").strip()})
+        escribir_json_drive(servicio, ARCHIVO_PENDIENTES, pendientes, archivo_id)
+        return True
+    except Exception:
+        return False
+
+st.sidebar.divider()
+st.sidebar.markdown("### 💬 ¿Dudas con el formato?")
+pregunta_asist = st.sidebar.text_input("Escribe tu pregunta", key="_asist_pregunta", placeholder="Ej. ¿Qué hago si sale NO CUMPLE?")
+if (pregunta_asist or "").strip():
+    resultados_asist = asistente.buscar(pregunta_asist, base_asistente())
+    registradas = st.session_state.setdefault("_asist_registradas", [])
+    if resultados_asist and resultados_asist[0][0] >= asistente.UMBRAL_CONFIANZA:
+        mejor = resultados_asist[0][1]
+        st.sidebar.markdown(f"**{mejor['pregunta']}**")
+        st.sidebar.info(mejor["respuesta"])
+        otras = [e for s, e in resultados_asist[1:] if s >= asistente.UMBRAL_CONFIANZA]
+        if otras:
+            st.sidebar.caption("También te puede servir: " + " · ".join(f"«{e['pregunta']}»" for e in otras))
+        if st.sidebar.button("👎 No resolvió mi duda", key="_asist_no_sirvio"):
+            ok_reg = pregunta_asist in registradas or registrar_pendiente(pregunta_asist, "No le sirvió la respuesta", mejor["id"])
+            if ok_reg and pregunta_asist not in registradas:
+                registradas.append(pregunta_asist)
+            st.sidebar.success("Gracias. La coordinación revisará tu pregunta. Mientras, pregunta en el grupo de WhatsApp.")
+    else:
+        if pregunta_asist not in registradas and registrar_pendiente(pregunta_asist, "Sin respuesta"):
+            registradas.append(pregunta_asist)
+        st.sidebar.warning("Todavía no sé responder eso. Ya quedó registrada para que la coordinación agregue la respuesta. "
+                           "Mientras, pregunta en el grupo de WhatsApp de Mantenimiento SIMAJ.")
+
+# ---------- Panel de coordinación (protegido con la clave de los Secrets) ----------
+def clave_valida(clave):
+    try:
+        esperada = st.secrets.get("clave_coordinacion")
+    except Exception:
+        esperada = None
+    return bool(esperada) and hmac.compare_digest(str(clave), str(esperada))
+
+st.sidebar.divider()
+st.sidebar.markdown("### 🔒 Coordinación")
+if not st.session_state.get("_coord_ok"):
+    clave_coord = st.sidebar.text_input("Clave de coordinación", type="password", key="_coord_clave")
+    if clave_coord:
+        if clave_valida(clave_coord):
+            st.session_state["_coord_ok"] = True
+            st.rerun()
+        else:
+            st.sidebar.error("Clave incorrecta.")
+else:
+    def salir_coordinacion():
+        st.session_state["_coord_ok"] = False
+        st.session_state["_coord_panel"] = False
+
+    st.sidebar.toggle("Abrir panel de coordinación", key="_coord_panel")
+    st.sidebar.button("Cerrar sesión de coordinación", key="_coord_salir", on_click=salir_coordinacion)
+
+@st.cache_data(ttl=300, show_spinner="Buscando reportes en Drive...")
+def listar_reportes(raiz):
+    """Reportes guardados por la app: <raíz>/<Estación o Diagnósticos>/<Equipo>/archivo."""
+    servicio = build("drive", "v3", credentials=credenciales_google())
+
+    def hijos(padre):
+        salida, token = [], None
+        while True:
+            r = servicio.files().list(q=f"'{padre}' in parents and trashed=false", pageSize=1000, pageToken=token,
+                                      fields="nextPageToken, files(id,name,mimeType,webViewLink,createdTime)").execute(num_retries=3)
+            salida += r.get("files", [])
+            token = r.get("nextPageToken")
+            if not token:
+                return salida
+
+    reportes = []
+    for c1 in hijos(raiz):
+        if c1["mimeType"] != TIPO_CARPETA or c1["name"] in CARPETAS_NO_REPORTES:
+            continue
+        for c2 in hijos(c1["id"]):
+            if c2["mimeType"] != TIPO_CARPETA:
+                continue
+            for f in hijos(c2["id"]):
+                if f["mimeType"] != TIPO_CARPETA:
+                    reportes.append({"Fecha": f["name"][:10].replace(".", "-") if re.match(r"^\d{4}\.\d{2}\.\d{2}", f["name"]) else "",
+                                     "Estación / carpeta": c1["name"], "Equipo": c2["name"], "Archivo": f["name"],
+                                     "Abrir": f.get("webViewLink", ""), "id": f["id"]})
+    return sorted(reportes, key=lambda r: (r["Fecha"], r["Archivo"]), reverse=True)
+
+def descargar_archivo_drive(archivo_id):
+    return build("drive", "v3", credentials=credenciales_google()).files().get_media(fileId=archivo_id).execute(num_retries=3)
+
+def panel_coordinacion():
+    st.title("Panel de coordinación")
+    if secrets_faltantes():
+        st.error("Faltan las credenciales de Google en Secrets; el panel necesita Drive.")
+        return
+    tab_hist, tab_asist = st.tabs(["📚 Historial de reportes", "🧠 Entrenar asistente"])
+
+    with tab_hist:
+        c_act, _ = st.columns([1, 4])
+        if c_act.button("🔄 Actualizar lista", key="_coord_actualizar"):
+            listar_reportes.clear()
+        try:
+            reportes = listar_reportes(st.secrets["drive_carpeta_id"])
+        except Exception as e:
+            st.error(f"No se pudo leer Drive: {error_google(e)}")
+            reportes = []
+        c1, c2, c3 = st.columns(3)
+        carpetas = ["Todas"] + sorted({r["Estación / carpeta"] for r in reportes})
+        f_carpeta = c1.selectbox("Estación / carpeta", carpetas, key="_coord_f_carpeta")
+        equipos_h = ["Todos"] + sorted({r["Equipo"] for r in reportes if f_carpeta in ("Todas", r["Estación / carpeta"])})
+        f_equipo = c2.selectbox("Equipo", equipos_h, key="_coord_f_equipo")
+        f_texto = c3.text_input("Buscar en el nombre (N/S, fecha, PROV...)", key="_coord_f_texto")
+        filtrados = [r for r in reportes if f_carpeta in ("Todas", r["Estación / carpeta"]) and f_equipo in ("Todos", r["Equipo"])
+                     and asistente.normalizar(f_texto) in asistente.normalizar(r["Archivo"])]
+        st.caption(f"{len(filtrados)} de {len(reportes)} reportes guardados por la app.")
+        if filtrados:
+            st.dataframe(pd.DataFrame(filtrados).drop(columns=["id"]), hide_index=True, use_container_width=True,
+                         column_config={"Abrir": st.column_config.LinkColumn("Abrir", display_text="Abrir en Drive")})
+            elegido = st.selectbox("Descargar un reporte", [r["Archivo"] for r in filtrados], key="_coord_descargar")
+            r_sel = next(r for r in filtrados if r["Archivo"] == elegido)
+            st.download_button("⬇️ Descargar", data=lambda fid=r_sel["id"]: descargar_archivo_drive(fid), file_name=r_sel["Archivo"],
+                               mime="application/pdf" if r_sel["Archivo"].lower().endswith(".pdf") else None, on_click="ignore",
+                               key="_coord_btn_descargar")
+
+    with tab_asist:
+        servicio = build("drive", "v3", credentials=credenciales_google())
+        id_conoc, conoc = leer_json_drive(servicio, ARCHIVO_CONOCIMIENTO, {})
+        conoc.setdefault("agregadas", []); conoc.setdefault("eliminadas", [])
+        id_pend, pendientes = leer_json_drive(servicio, ARCHIVO_PENDIENTES, [])
+
+        def guardar_conocimiento():
+            escribir_json_drive(servicio, ARCHIVO_CONOCIMIENTO, conoc, id_conoc)
+            conocimiento_drive.clear()
+
+        def poner_entrada(entrada):
+            conoc["agregadas"] = [e for e in conoc["agregadas"] if e["id"] != entrada["id"]] + [entrada]
+            conoc["eliminadas"] = [i for i in conoc["eliminadas"] if i != entrada["id"]]
+
+        st.subheader(f"Preguntas sin responder ({len(pendientes)})")
+        if not pendientes:
+            st.caption("No hay preguntas pendientes.")
+        for i, p in enumerate(pendientes):
+            with st.form(f"_coord_pend_{i}"):
+                st.markdown(f"**«{p['pregunta']}»** · {p.get('fecha', '')} · {p.get('motivo', '')}" + (f" · {p['correo']}" if p.get("correo") else ""))
+                resp = st.text_area("Respuesta", key=f"_coord_pend_resp_{i}")
+                claves = st.text_input("Otras palabras con que lo preguntarían (opcional)", key=f"_coord_pend_claves_{i}")
+                b1, b2 = st.columns(2)
+                if b1.form_submit_button("💾 Guardar respuesta") and resp.strip():
+                    poner_entrada({"id": f"c_{int(time.time() * 1000)}", "pregunta": p["pregunta"], "claves": claves, "respuesta": resp.strip()})
+                    guardar_conocimiento()
+                    escribir_json_drive(servicio, ARCHIVO_PENDIENTES, [x for j, x in enumerate(pendientes) if j != i], id_pend)
+                    st.rerun()
+                if b2.form_submit_button("🗑️ Descartar"):
+                    escribir_json_drive(servicio, ARCHIVO_PENDIENTES, [x for j, x in enumerate(pendientes) if j != i], id_pend)
+                    st.rerun()
+
+        st.subheader("Agregar una pregunta nueva")
+        with st.form("_coord_nueva", clear_on_submit=True):
+            n_preg = st.text_input("Pregunta")
+            n_claves = st.text_input("Otras palabras con que lo preguntarían (opcional)")
+            n_resp = st.text_area("Respuesta")
+            if st.form_submit_button("➕ Agregar") and n_preg.strip() and n_resp.strip():
+                poner_entrada({"id": f"c_{int(time.time() * 1000)}", "pregunta": n_preg.strip(), "claves": n_claves, "respuesta": n_resp.strip()})
+                guardar_conocimiento()
+                st.rerun()
+
+        base_actual = asistente.combinar_base(conoc)
+        st.subheader(f"Base de conocimiento ({len(base_actual)} preguntas)")
+        st.caption("Edita o elimina las respuestas. Los cambios aplican de inmediato para todos.")
+        for e in base_actual:
+            with st.expander(e["pregunta"]):
+                with st.form(f"_coord_edit_{e['id']}"):
+                    preg = st.text_input("Pregunta", value=e["pregunta"])
+                    claves = st.text_input("Palabras clave", value=e.get("claves", ""))
+                    resp = st.text_area("Respuesta", value=e["respuesta"], height=140)
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("💾 Guardar cambios"):
+                        poner_entrada({"id": e["id"], "pregunta": preg.strip(), "claves": claves, "respuesta": resp.strip()})
+                        guardar_conocimiento()
+                        st.rerun()
+                    if b2.form_submit_button("🗑️ Eliminar"):
+                        conoc["agregadas"] = [x for x in conoc["agregadas"] if x["id"] != e["id"]]
+                        conoc["eliminadas"] = sorted(set(conoc["eliminadas"]) | {e["id"]})
+                        guardar_conocimiento()
+                        st.rerun()
+
+if st.session_state.get("_coord_ok") and st.session_state.get("_coord_panel"):
+    panel_coordinacion()
+    st.stop()  # mientras el panel está abierto no se muestra el formulario
+
+# ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
 # ==========================================
 equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
@@ -523,6 +759,13 @@ st.subheader(subtitulo_formato)
 # ==========================================
 # FUNCIONES AUXILIARES GLOBALES
 # ==========================================
+avisos_valores = []  # valores fuera de lo normal; se avisan junto al campo y antes de enviar, sin bloquear
+
+def aviso_rango(valor, minimo, maximo, etiqueta, unidad):
+    if valor is not None and not (minimo <= valor <= maximo):
+        texto = f"{etiqueta}: {valor:.4f} {unidad} está fuera de lo normal ({minimo:g}–{maximo:g} {unidad}). Revisa que esté bien capturado."
+        st.warning("⚠️ " + texto)
+        avisos_valores.append(texto)
 S_DAT = "Datos del analizador y condiciones ambientales"
 S_HIS = "Histórico de mantenimientos"
 S_PG = "Revisión de parámetros generales"
@@ -717,7 +960,8 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
             ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
             kv(S_DAT, "N/S (Automático)", ns_capturado)
         
-        kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", format="%.4f", value=634.0, key="presion_unica"))
+        presion_amb = kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", format="%.4f", value=634.0, key="presion_unica"))
+        aviso_rango(presion_amb, 600, 680, "Presión ambiental", "Torr")
         
         falla = kv(S_DAT, "El analizador presenta Falla o Alarma", st.selectbox("El analizador presenta Falla o Alarma", ["-", "No 🟢", "Sí 🔴"], key="falla_alarma"))
         if falla == "Sí 🔴":
@@ -739,18 +983,30 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         with col_ini:
             st.markdown("### Inicial")
             fecha_ref = kv(S_DAT, "Fecha (Inicial)", st.date_input("Fecha (Inicial)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_ini"), "Inicial")
-            kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None, key="hora_ini"), "Inicial")
-            kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", format="%.4f", value=None, key="temp_ext_ini"), "Inicial")
-            kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", format="%.4f", value=None, key="temp_int_ini"), "Inicial")
+            hora_ini = kv(S_DAT, "Hora (Inicial)", st.time_input("Hora (Inicial)", value=None, key="hora_ini"), "Inicial")
+            aviso_rango(kv(S_DAT, "Temp exterior (C°) - Ini", st.number_input("Temp exterior (C°) - Ini", format="%.4f", value=None, key="temp_ext_ini"), "Inicial"),
+                        0, 45, "Temperatura exterior inicial", "°C")
+            aviso_rango(kv(S_DAT, "Temp interior (C°) - Ini", st.number_input("Temp interior (C°) - Ini", format="%.4f", value=None, key="temp_int_ini"), "Inicial"),
+                        10, 40, "Temperatura interior inicial", "°C")
             datos_resumen["Fecha de Servicio"] = str(fecha_ref)
             año_f, mes_f, dia_f = fecha_ref.strftime("%Y"), fecha_ref.strftime("%m"), fecha_ref.strftime("%d")
             
         with col_fin:
             st.markdown("### Final")
-            kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_fin"), "Final")
-            kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None, key="hora_fin"), "Final")
-            kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", format="%.4f", value=None, key="temp_ext_fin"), "Final")
-            kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", format="%.4f", value=None, key="temp_int_fin"), "Final")
+            fecha_fin = kv(S_DAT, "Fecha (Final)", st.date_input("Fecha (Final)", datetime.date.today(), max_value=datetime.date.today(), key="fecha_fin"), "Final")
+            hora_fin = kv(S_DAT, "Hora (Final)", st.time_input("Hora (Final)", value=None, key="hora_fin"), "Final")
+            aviso_rango(kv(S_DAT, "Temp exterior (C°) - Fin", st.number_input("Temp exterior (C°) - Fin", format="%.4f", value=None, key="temp_ext_fin"), "Final"),
+                        0, 45, "Temperatura exterior final", "°C")
+            aviso_rango(kv(S_DAT, "Temp interior (C°) - Fin", st.number_input("Temp interior (C°) - Fin", format="%.4f", value=None, key="temp_int_fin"), "Final"),
+                        10, 40, "Temperatura interior final", "°C")
+
+    # fechas y horas: el final no puede ser antes del inicio
+    if fecha_ref and fecha_fin and fecha_fin < fecha_ref:
+        texto = "La fecha final es anterior a la fecha inicial. Revisa las fechas."
+        st.warning("⚠️ " + texto); avisos_valores.append(texto)
+    elif fecha_ref and fecha_fin == fecha_ref and hora_ini and hora_fin and hora_fin < hora_ini:
+        texto = "La hora final es anterior a la hora inicial del mismo día. Revisa las horas."
+        st.warning("⚠️ " + texto); avisos_valores.append(texto)
 
 # ==========================================
 # 2. HISTÓRICO (SE OCULTA EN MANTENIMIENTO EXTERNO)
@@ -1753,6 +2009,9 @@ motivo_bloqueo = ("Selecciona la Estación para habilitar la descarga" if sin_es
 if faltantes and not sin_estacion:
     st.warning("⚠️ Para descargar o enviar el formato completa:\n\n"
                + "\n".join(f"- {f}" for f in faltantes))
+
+if avisos_valores:
+    st.info("🔎 Antes de enviar, revisa estos valores (no impiden enviar):\n\n" + "\n".join(f"- {a}" for a in avisos_valores))
 
 col_imprimir, col_pdf, col_drive = st.columns(3, vertical_alignment="center")
 mensajes = st.columns(3)[2].container()
