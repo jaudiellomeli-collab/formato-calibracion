@@ -1763,10 +1763,11 @@ if es_gas:
         with col_cs_span:
             st.markdown("#### Concentración Span")
             c1, c2, c3 = st.columns(3)
-            with c1: val_sg = st.number_input("Span Gen", format="%.4f", value=span_gen_default, disabled=True, key="vsg")
+            # Editable: con una mezcla multigas el span de cada gas es el que indica el calibrador (p. ej. ~37.6 ppm de CO)
+            with c1: val_sg = st.number_input("Span Gen", format="%.4f", value=span_gen_default, min_value=0.0, key=f"vsg_{gas_sel}")
             with c2: resp_s = st.number_input("Resp Span", value=None, format="%.4f", key="ras")
             with c3:
-                if resp_s is not None and val_sg != 0:
+                if resp_s is not None and val_sg:
                     desv_s = (resp_s - val_sg) / val_sg
                     st.write(f"% desv: **{desv_s * 100:.2f}%**")
                     if -0.03 <= desv_s <= 0.03: st.success("Cumple ✅")
