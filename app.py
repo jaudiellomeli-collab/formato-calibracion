@@ -111,6 +111,7 @@ CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
 TIPO_DIAG = "Diagnóstico de equipo (sin estación)"
 EQUIPOS_DIAG = ["PM Thermo"]
 CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
+MUL_TOL_PUNTO = 0.025  # desviación máxima de cada punto de la multipunto respecto al valor del calibrador
 PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_", "quitar_")  # las fotos y sus descripciones se guardan aparte, en "fotos"
 VERSION_BORRADOR = 2
 # Opciones de versiones anteriores del formato que cambiaron de texto
@@ -1785,22 +1786,37 @@ if es_gas:
     with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=req_comp):
         col_pts, col_res = st.columns([1.5, 1])
         with col_pts:
-            x_vals, y_vals, desviaciones = [], [], []
-            for i, cal_val in enumerate(puntos_multipunto):
+            # Los valores del calibrador son editables: en una mezcla multigas (NO, SO2 y CO del mismo cilindro)
+            # cada gas recibe una concentración distinta de la nominal, p. ej. 0.400 ppm de NO con ~35 ppm de CO.
+            st.caption(f"Valores del calibrador editables. Cada punto debe quedar dentro de ±{MUL_TOL_PUNTO * 100:.1f} % "
+                       f"del valor generado (el cero, dentro de ±{cero_tol:g}).")
+            c1, c2, c3, c4 = st.columns(4)
+            for col, titulo in zip((c1, c2, c3, c4), ("Calibrador", "Analizador", "Diferencia", "% Desv.")):
+                with col: st.markdown(f"**{titulo}**")
+            x_vals, y_vals, desviaciones, puntos_ok = [], [], [], []
+            for i, cal_def in enumerate(puntos_multipunto):
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.number_input("cal", format="%.4f", value=cal_val, disabled=True, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
+                with c1: cal_val = st.number_input("cal", format="%.4f", value=cal_def, min_value=0.0, key=f"mc_{i}_{gas_sel}", label_visibility="collapsed")
                 with c2: ana_val = st.number_input("ana", value=None, key=f"ma_{i}_{gas_sel}", format="%.4f", label_visibility="collapsed")
+                ok_punto = dif = desv = None
+                if ana_val is not None and cal_val is not None:
+                    dif = ana_val - cal_val
+                    if cal_val != 0:
+                        desv = dif / cal_val
+                        desviaciones.append(desv)
+                        ok_punto = abs(desv) <= MUL_TOL_PUNTO + 1e-9
+                    else:
+                        ok_punto = abs(dif) <= cero_tol + 1e-9
+                    puntos_ok.append(ok_punto)
+                    x_vals.append(cal_val); y_vals.append(ana_val)
                 with c3:
-                    if ana_val is not None:
-                        dif = ana_val - cal_val
-                        st.write(f"**{dif:.4f}**")
-                        if cal_val != 0:
-                            desviaciones.append(dif / cal_val)
-                            st.write(f"{(dif/cal_val)*100:.2f}%")
-                if ana_val is not None: x_vals.append(cal_val); y_vals.append(ana_val)
-                tabla_pdf(S_MUL, "", ["Calibrador", "Analizador", "Diferencia", "% Desviación"],
-                          [Caja(cal_val), Caja(ana_val), f"{ana_val - cal_val:.4f}" if ana_val is not None else "",
-                           f"{(ana_val - cal_val) / cal_val * 100:.2f}%" if ana_val is not None and cal_val else ""])
+                    if dif is not None: st.write(f"**{dif:.4f}**")
+                with c4:
+                    if ok_punto is not None:
+                        st.write(f"{'✅' if ok_punto else '❌'} {desv * 100:.2f}%" if desv is not None else ("✅ Cero" if ok_punto else "❌ Cero"))
+                tabla_pdf(S_MUL, "", ["Calibrador", "Analizador", "Diferencia", "% Desviación", "Resultado"],
+                          [Caja(cal_val), Caja(ana_val), f"{dif:.4f}" if dif is not None else "",
+                           f"{desv * 100:.2f}%" if desv is not None else "", _res(ok_punto)])
 
         m = b = r2 = promedio = None
         if len(x_vals) > 1:
@@ -1834,9 +1850,16 @@ if es_gas:
                 with c1: st.write("✅" if cond_r2 else "❌")
                 with c2: st.markdown(f"#### {r2:.6f}")
                 
-                aprobado = cond_m and cond_b and cond_r2
-                
-                for etiqueta, valor in [("Pendiente (m)", f"{m:.5f}"), ("Intercepto (b)", f"{b:.5f}"), ("R2", f"{r2:.6f}")]:
+                cond_puntos = all(puntos_ok)
+                st.write(f"**Puntos dentro de ±{MUL_TOL_PUNTO * 100:.1f} %**")
+                c1, c2 = st.columns([1, 4])
+                with c1: st.write("✅" if cond_puntos else "❌")
+                with c2: st.markdown(f"#### {sum(puntos_ok)} de {len(puntos_ok)}")
+
+                aprobado = cond_m and cond_b and cond_r2 and cond_puntos
+
+                for etiqueta, valor in [("Pendiente (m)", f"{m:.5f}"), ("Intercepto (b)", f"{b:.5f}"), ("R2", f"{r2:.6f}"),
+                                        (f"Puntos dentro de ±{MUL_TOL_PUNTO * 100:.1f} %", f"{sum(puntos_ok)} de {len(puntos_ok)}")]:
                     tabla_pdf(S_MUL, "Regresión", None, [etiqueta, Caja(valor)], [1, 1])
                 tabla_pdf(S_MUL, "Regresión", None, ["Resultado", Alerta("MULTIPUNTO APROBADO" if aprobado else "MULTIPUNTO RECHAZADO", aprobado)], [1, 1])
                 if aprobado: st.success("✅ MULTIPUNTO APROBADO")
@@ -1858,7 +1881,8 @@ if es_gas:
                     <br>La calibración será aceptada sí: <i>(Depende de la marca y modelo de equipo estos criterios)</i><br><br>
                     • El gradiente (m) se encuentra entre los valores de 0.98 y 1.02<br>
                     • La intercepción (b) esté entre - 2 a + 2<br>
-                    • La correlación (R²) es mayor que 0.99.<br><br>
+                    • La correlación (R²) es mayor que 0.99.<br>
+                    • Cada punto queda dentro de ±2.5 % del valor del calibrador (el cero, dentro de su tolerancia).<br><br>
                     <b>Rechazar la calibración si el criterio de arriba no se obtiene. La calibración puede fallar por fugas o por el depurador.</b>
                     </span>
                 </div>
