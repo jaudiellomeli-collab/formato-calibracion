@@ -118,10 +118,10 @@ BASE_INICIAL = [
                   "especificaciones». Si falta algo: «Mantenimiento pendiente: falta reemplazar la bomba; se instalará el "
                   "28/10/2026». No basta con «se mantiene en observación»."},
     {"id": "diagnostico", "pregunta": "¿Cuándo uso el formato de diagnóstico y cómo se llena?",
-     "claves": "diagnostico sin estacion descompuesto laboratorio falla pruebas queda funcionando thermo",
+     "claves": "diagnostico sin estacion descompuesto laboratorio falla pruebas queda funcionando thermo bam gases ozono nox co so2",
      "respuesta": "Para equipos que no están en una estación (descompuestos o en laboratorio). Escribe el N/S del equipo, la "
                   "falla reportada y la encontrada, registra cada prueba con su resultado (Normal/Anormal) y al final indica "
-                  "si queda funcionando, el motivo y las refacciones requeridas. Por ahora es solo para PM Thermo."},
+                  "si queda funcionando, el motivo y las refacciones requeridas. Sirve para cualquier equipo: O3, NOx, CO, SO2, BAM y Thermo; en gases incluye flujo, cero-span y multipunto."},
     {"id": "enviar", "pregunta": "¿Cómo entrego el formato terminado?",
      "claves": "entregar enviar mandar mando terminar terminado formato coordinador drive whatsapp grupo pdf",
      "respuesta": "1. Pulsa 📄 Descargar PDF y revísalo.\n2. Pulsa ☁️ Respaldar en Drive y enviar al coordinador y espera los dos "

@@ -109,7 +109,7 @@ def error_google(e):
 CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
 # Diagnóstico de equipos que están fuera de estación (descompuestos, en laboratorio). Por ahora solo PM Thermo.
 TIPO_DIAG = "Diagnóstico de equipo (sin estación)"
-EQUIPOS_DIAG = ["PM Thermo"]
+EQUIPOS_DIAG = ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"]
 CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
 MUL_TOL_PUNTO = 0.025  # desviación máxima de cada punto de la multipunto respecto al valor del calibrador
 PREFIJOS_SIN_BORRADOR = ("_", "up_", "desc_fot_", "quitar_")  # las fotos y sus descripciones se guardan aparte, en "fotos"
@@ -749,8 +749,8 @@ etq_empresa_tec = "Empresa proveedora" if es_proveedor else "Institución"
 # ENCABEZADO
 # ==========================================
 if es_diagnostico:
-    titulo_formato = f"FORMATO DE DIAGNÓSTICO {gas_sel} ({pm_tipo})"
-    subtitulo_formato = "Diagnóstico de equipo fuera de estación - Monitor de Partículas"
+    titulo_formato = f"FORMATO DE DIAGNÓSTICO {gas_sel}" if es_gas else f"FORMATO DE DIAGNÓSTICO {gas_sel} ({pm_tipo})"
+    subtitulo_formato = "Diagnóstico de equipo fuera de estación - Monitor de " + ("Gases" if es_gas else "Partículas")
 else:
     titulo_formato = f"FORMATO DE CALIBRACIÓN {gas_sel}" if es_gas else f"FORMATO DE CALIBRACIÓN {gas_sel} ({pm_tipo})"
     subtitulo_formato = "Parámetros Generales - Monitor de " + ("Gases" if es_gas else "Partículas")
@@ -784,7 +784,8 @@ S_PRU = "Pruebas realizadas para detectar el problema"
 S_DXR = "Resultado del diagnóstico"
 
 if es_diagnostico:
-    ORDEN_PDF = [S_DAT, S_DXF, S_PG, S_SENS, S_MAS, S_PRU, S_LIM, S_DET, S_DXR, S_RES]
+    # en gases el diagnóstico conserva flujo, calibrador, cero-span y multipunto para comprobar la reparación
+    ORDEN_PDF = [S_DAT, S_DXF, S_PG, S_SENS, S_MAS, S_FLU, S_PRU, S_LIM, S_DET, S_CAL, S_CS, S_MUL, S_DXR, S_RES]
 else:
     ORDEN_PDF = [S_DAT, S_HIS, S_PG, S_SENS, S_MAS, S_FLU, S_LIM]
     if es_externo: ORDEN_PDF.append(S_DET)
@@ -920,7 +921,7 @@ def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc
                     st.image(datos, use_container_width=True)
                     # la clave sigue al archivo (no a su posición) para que cada descripción se quede con su foto
                     ident = getattr(foto, "file_id", None) or f"{foto.name}_{foto.size}"
-                    desc_foto = st.text_area("Descripción:", value=desc_default if not multiple else "", key=f"desc_fot_{key_prefix}_{ident}",
+                    desc_foto = st.text_area("Descripción:", value=desc_default, key=f"desc_fot_{key_prefix}_{ident}",
                                              placeholder="Ej. Detalle...", height="content")
                     _sec(seccion_id)["fotos"].append((datos, desc_foto))
 
@@ -934,7 +935,7 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         if es_diagnostico:
             # el equipo está fuera de estación: se identifica por su número de serie
             estacion_sel = "Sin estación"
-            num_serie_val = st.text_input("N/S del equipo *", key="dx_ns", placeholder="Ej. 5014i203241211").strip()
+            num_serie_val = st.text_input("N/S del equipo *", key="dx_ns", placeholder="Ej. 23-1564 o 5014i203241211").strip()
             kv(S_DAT, "N/S del equipo", num_serie_val)
             kv(S_DAT, "Ubicación actual del equipo", st.text_input("Ubicación actual del equipo", key="dx_ubic", placeholder="Ej. Laboratorio SIMAJ"))
             todas_estaciones = sorted(set().union(*[d.keys() for d in (equipos_o3, equipos_nox, equipos_co, equipos_so2, equipos_pm10, equipos_pm25)]))
@@ -1599,7 +1600,8 @@ def agregar_prueba():
 if es_diagnostico:
     with st.expander("🧪 PRUEBAS REALIZADAS PARA DETECTAR EL PROBLEMA", expanded=True):
         st.caption("Registra cada prueba que hiciste y lo que obtuviste. Ejemplos: prueba de fugas, voltajes de la fuente, "
-                   "vacío de la bomba, comunicación, lecturas de sensores, conteos beta.")
+                   "vacío de la bomba, comunicación, lecturas de sensores, conteos beta, voltaje de la lámpara UV o del PMT, "
+                   "temperatura del convertidor.")
         pesos_pru = [2, 2, 1.1, 2.4]
         enc_pru = ["Prueba realizada", "Resultado obtenido", "Estado", "Observaciones"]
         c1, c2, c3, c4 = st.columns(pesos_pru)
@@ -1782,7 +1784,7 @@ if es_gas:
                    
         if con_fotos:
             st.divider()
-            renderizar_fotos_seccion(S_CS, "📷 Evidencia de Cero-Span", "fot_cs", multiple=False, desc_default="Pantalla Cero-Span")
+            renderizar_fotos_seccion(S_CS, "📷 Evidencia de Cero-Span", "fot_cs", multiple=True, desc_default="Pantalla Cero-Span")
 
     with st.expander("📈 CALIBRACIÓN MULTIPUNTO", expanded=req_comp):
         col_pts, col_res = st.columns([1.5, 1])
@@ -1904,7 +1906,7 @@ if es_gas:
 
         if con_fotos:
             st.divider()
-            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=False, desc_default="Gráfica Multipunto Envidas")
+            renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=True, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
 if not es_externo and not es_bam:
