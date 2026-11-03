@@ -705,13 +705,15 @@ es_thermo = gas_sel == "PM Thermo"
 es_particulas = es_bam or es_thermo
 
 flujo_ideal_vol = 0 
+flujo_rango = None  # (mínimo, máximo) en cc/min cuando el criterio es un rango y no ± % del ideal
 
 if gas_sel == "Ozono (O3)": 
     equipos_act = equipos_o3; modelo_analizador = "Serinus 10"
     flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Óxidos de Nitrógeno (NOx)": 
     equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
-    flujo_ideal_vol = 650; flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
+    # Serinus 40: el flujo volumétrico debe quedar entre 600 y 630 cc/min (criterio SIMAJ)
+    flujo_ideal_vol = 615; flujo_rango = (600.0, 630.0); flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Monóxido de Carbono (CO)": 
     equipos_act = equipos_co; modelo_analizador = "Serinus 30"
     flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.0]; span_gen_default = 40.0
@@ -1090,7 +1092,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         
     elif gas_sel == "Óxidos de Nitrógeno (NOx)":
         fila_libre("Flujo Estándar", "scc/min", "650", "nox_f_est")
-        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "650", 617.5, 682.5, "nox_f_vol"))
+        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "600 - 630", 600.0, 630.0, "nox_f_vol"))
         procesar_resultado(*fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas"))
         procesar_resultado(*fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda"))
         procesar_resultado(*fila_regla("Temp. del convertidor", "°C", "250-335", 250.0, 335.0, "nox_t_conv"))
@@ -1502,15 +1504,16 @@ if es_gas:
             with c4: st.write("-")
             with c5: st.write("-")
 
+            ideal_txt = f"{flujo_rango[0]:g} - {flujo_rango[1]:g}" if flujo_rango else str(flujo_ideal_vol)
             c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
             with c1: st.write("Flujo Volumétrico (cc/min)")
-            with c2: st.write(str(flujo_ideal_vol))
+            with c2: st.write(ideal_txt)
             with c3: val = st.number_input("val_vol", format="%.4f", key=f"{key_prefix}_vol", label_visibility="collapsed", value=None)
 
             resultado_cumple, desv_txt = None, ""
             if val is not None:
                 desv = (val - flujo_ideal_vol) / flujo_ideal_vol
-                resultado_cumple = abs(desv) <= flujo_tol
+                resultado_cumple = (flujo_rango[0] <= val <= flujo_rango[1]) if flujo_rango else abs(desv) <= flujo_tol
                 desv_txt = f"{desv * 100:.2f}%"
             with c4: st.write(desv_txt or "-")
             with c5:
@@ -1520,10 +1523,14 @@ if es_gas:
                 else: st.write("-")
 
             tabla_pdf(S_FLU, titulo, enc_flujo, ["Flujo Estandar (scc/min)", "-", Caja(val_est), "", ""], pesos_flujo)
-            tabla_pdf(S_FLU, titulo, enc_flujo, ["Flujo Volumétrico (cc/min)", str(flujo_ideal_vol), Caja(val), desv_txt, _res(resultado_cumple)], pesos_flujo)
+            tabla_pdf(S_FLU, titulo, enc_flujo, ["Flujo Volumétrico (cc/min)", ideal_txt, Caja(val), desv_txt, _res(resultado_cumple)], pesos_flujo)
             return val, resultado_cumple
 
-        st.caption(f"Tolerancia del flujo volumétrico: ± {flujo_tol * 100:g}% respecto a {flujo_ideal_vol} cc/min.")
+        if flujo_rango:
+            st.caption(f"Rango aceptable del flujo volumétrico: {flujo_rango[0]:g} a {flujo_rango[1]:g} cc/min "
+                       f"(la desviación se muestra respecto a {flujo_ideal_vol} cc/min, el centro del rango).")
+        else:
+            st.caption(f"Tolerancia del flujo volumétrico: ± {flujo_tol * 100:g}% respecto a {flujo_ideal_vol} cc/min.")
         _, cumple_verif_gas = render_tabla_flujo_gases("Verificación", "verif")
         if cumple_verif_gas is None:
             st.info("Captura el flujo volumétrico para saber si se requiere ajuste.")
