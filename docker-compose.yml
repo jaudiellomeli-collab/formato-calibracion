@@ -1,0 +1,36 @@
+# Formato de calibracion SIMAJ en un servidor.
+#
+#   1. Copia la plantilla de secretos y llenala:
+#        cp secrets.toml.example .streamlit/secrets.toml
+#   2. docker compose up -d --build
+#
+# En el servidor Ubuntu lo hace todo scripts/servidor-ubuntu.sh, que ademas
+# pone nginx delante con HTTPS en una carpeta del dominio (/formato-calibracion).
+#
+# La configuracion de este archivo sale de .env (en esta misma carpeta, no se
+# versiona): FORMATO_PUBLICAR y RUTA_BASE. Sin .env, queda en
+# http://<servidor>:8084 en la raiz.
+
+name: formato-calibracion
+
+services:
+  formato:
+    build: .
+    image: formato-calibracion:local
+    container_name: formato-calibracion
+    restart: unless-stopped
+    init: true
+    environment:
+      # Carpeta del sitio detras de nginx, sin diagonales (formato-calibracion).
+      STREAMLIT_SERVER_BASE_URL_PATH: ${RUTA_BASE:-}
+      TZ: America/Mexico_City
+    ports:
+      # Con nginx delante va FORMATO_PUBLICAR=127.0.0.1:8084 en .env: Docker
+      # abre los puertos publicados por encima de UFW, y sin eso el 8084
+      # quedaria expuesto a la red sin HTTPS. El 8080-8083 ya estan ocupados
+      # (tablero de aire, Validador, Ladrilleras y Numeralia).
+      - "${FORMATO_PUBLICAR:-8084}:8501"
+    volumes:
+      # Llaves de Google, carpeta de Drive y correo del coordinador. Solo
+      # lectura: la app nunca las modifica.
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro

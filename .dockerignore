@@ -1,0 +1,22 @@
+# Lo que no debe entrar a la imagen.
+.git
+.gitignore
+.devcontainer
+.claude
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+
+# Secretos: se montan en el servidor, nunca se hornean en la imagen.
+.streamlit/secrets.toml
+client_secret*.json
+token*.json
+.env
+.env.*
+
+Dockerfile
+.dockerignore
+docker-compose*.yml
+deploy
+scripts

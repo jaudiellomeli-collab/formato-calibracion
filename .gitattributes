@@ -1,0 +1,4 @@
+# Los scripts del servidor tienen que llegar con LF: con CRLF bash falla.
+*.sh text eol=lf
+*.conf text eol=lf
+Dockerfile text eol=lf
