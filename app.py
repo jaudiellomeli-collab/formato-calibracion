@@ -86,16 +86,62 @@ st.markdown("""
 SCOPES_GOOGLE = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/gmail.send"]
 SECRETS_REQUERIDOS = ["google_oauth", "drive_carpeta_id", "correo_coordinador"]
 
+# Los secretos se leen de variables de entorno (.env en el servidor Ubuntu) y, si no están, de .streamlit/secrets.toml.
+# Cada dato: (variable de entorno, ruta dentro de secrets.toml). Un valor vacío cuenta como no configurado.
+VARIABLES_SECRETOS = {
+    "drive_carpeta_id": ("DRIVE_CARPETA_ID", ("drive_carpeta_id",)),
+    "correo_coordinador": ("CORREO_COORDINADOR", ("correo_coordinador",)),
+    "clave_coordinacion": ("CLAVE_COORDINACION", ("clave_coordinacion",)),
+    "client_id": ("GOOGLE_CLIENT_ID", ("google_oauth", "client_id")),
+    "client_secret": ("GOOGLE_CLIENT_SECRET", ("google_oauth", "client_secret")),
+    "refresh_token": ("GOOGLE_REFRESH_TOKEN", ("google_oauth", "refresh_token")),
+}
+
+def _leer_env(ruta=".env"):
+    """Lee un .env (CLAVE=valor) a un diccionario. No se pasa a os.environ: Streamlit copia ahí las claves de
+    secrets.toml y en Windows (sin distinguir mayúsculas) drive_carpeta_id pisaría a DRIVE_CARPETA_ID."""
+    datos = {}
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            lineas = f.read().splitlines()
+    except OSError:
+        return datos
+    for linea in lineas:
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, valor = linea.removeprefix("export ").split("=", 1)
+        valor = valor.strip()
+        if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in "\"'":
+            valor = valor[1:-1]
+        datos[clave.strip()] = valor
+    return datos
+
+_ENV_ARCHIVO = _leer_env()
+
+def secreto(nombre, default=None):
+    """Valor de un secreto: archivo .env, luego variable de entorno (Docker la pasa con env_file), luego secrets.toml."""
+    variable, ruta = VARIABLES_SECRETOS[nombre]
+    valor = (_ENV_ARCHIVO.get(variable) or os.environ.get(variable) or "").strip()
+    if valor:
+        return valor
+    try:
+        nodo = st.secrets
+        for parte in ruta:
+            nodo = nodo[parte]
+        valor = str(nodo).strip()
+    except Exception:  # sin secrets.toml o sin esa clave
+        valor = ""
+    return valor or default
+
 def credenciales_google():
-    cfg = st.secrets["google_oauth"]
-    return Credentials(None, refresh_token=cfg["refresh_token"], token_uri="https://oauth2.googleapis.com/token",
-                       client_id=cfg["client_id"], client_secret=cfg["client_secret"], scopes=SCOPES_GOOGLE)
+    return Credentials(None, refresh_token=secreto("refresh_token"), token_uri="https://oauth2.googleapis.com/token",
+                       client_id=secreto("client_id"), client_secret=secreto("client_secret"), scopes=SCOPES_GOOGLE)
 
 def secrets_faltantes():
-    try:
-        return [s for s in SECRETS_REQUERIDOS if s not in st.secrets]
-    except Exception:  # no existe ningún archivo de secrets (por ejemplo, al correr en local)
-        return SECRETS_REQUERIDOS
+    hay = {"google_oauth": all(secreto(k) for k in ("client_id", "client_secret", "refresh_token")),
+           "drive_carpeta_id": bool(secreto("drive_carpeta_id")), "correo_coordinador": bool(secreto("correo_coordinador"))}
+    return [s for s in SECRETS_REQUERIDOS if not hay[s]]
 
 def error_google(e):
     """Mensaje de error breve: tipo, código HTTP y motivo, sin la URL de la petición ni datos de las credenciales."""
@@ -299,7 +345,7 @@ def guardar_borrador(correo, vista):
     """Guarda en Drive el formulario y sus fotos para la vista actual. Devuelve (fotos guardadas, imágenes inválidas)."""
     servicio = build("drive", "v3", credentials=credenciales_google())
     nombre_borrador = f"borrador_{correo}.json"
-    archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], nombre_borrador)
+    archivo_id, dict_global, carpeta_b = buscar_borrador(servicio, secreto("drive_carpeta_id"), nombre_borrador)
     vista_previa = dict_global.get(vista)
     previas = vista_previa.get("fotos", {}) if isinstance(vista_previa, dict) and "__version__" in vista_previa else {}
     fotos, invalidas = guardar_fotos(servicio, carpeta_b, correo, previas)
@@ -370,7 +416,7 @@ if col_btn2.button("📤 Cargar", use_container_width=True):
         try:
             with st.spinner("Cargando..."):
                 servicio = build("drive", "v3", credentials=credenciales_google())
-                archivo_id, dict_global, _ = buscar_borrador(servicio, st.secrets["drive_carpeta_id"], f"borrador_{correo_borrador.strip()}.json")
+                archivo_id, dict_global, _ = buscar_borrador(servicio, secreto("drive_carpeta_id"), f"borrador_{correo_borrador.strip()}.json")
         except Exception as e:
             st.sidebar.error(f"Error al cargar: {error_google(e)}")
         if dict_global is not None:
@@ -407,7 +453,7 @@ CARPETAS_NO_REPORTES = {CARPETA_BORRADORES, CARPETA_ASISTENTE}
 
 def leer_json_drive(servicio, nombre, vacio):
     """(id, contenido) de un JSON de la carpeta Asistente; (None, vacio) si todavía no existe."""
-    carpeta = carpeta_drive(servicio, st.secrets["drive_carpeta_id"], [CARPETA_ASISTENTE])
+    carpeta = carpeta_drive(servicio, secreto("drive_carpeta_id"), [CARPETA_ASISTENTE])
     res = servicio.files().list(q=f"name='{_q(nombre)}' and '{carpeta}' in parents and trashed=false",
                                 fields="files(id)").execute(num_retries=3).get("files", [])
     if not res:
@@ -419,7 +465,7 @@ def escribir_json_drive(servicio, nombre, contenido, archivo_id):
     if archivo_id:
         servicio.files().update(fileId=archivo_id, media_body=media).execute(num_retries=3)
     else:
-        carpeta = carpeta_drive(servicio, st.secrets["drive_carpeta_id"], [CARPETA_ASISTENTE])
+        carpeta = carpeta_drive(servicio, secreto("drive_carpeta_id"), [CARPETA_ASISTENTE])
         servicio.files().create(body={"name": nombre, "parents": [carpeta]}, media_body=media).execute(num_retries=3)
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -476,7 +522,7 @@ if (pregunta_asist or "").strip():
 # ---------- Panel de coordinación (protegido con la clave de los Secrets) ----------
 def clave_valida(clave):
     try:
-        esperada = st.secrets.get("clave_coordinacion")
+        esperada = secreto("clave_coordinacion")
     except Exception:
         esperada = None
     return bool(esperada) and hmac.compare_digest(str(clave), str(esperada))
@@ -543,7 +589,7 @@ def panel_coordinacion():
         if c_act.button("🔄 Actualizar lista", key="_coord_actualizar"):
             listar_reportes.clear()
         try:
-            reportes = listar_reportes(st.secrets["drive_carpeta_id"])
+            reportes = listar_reportes(secreto("drive_carpeta_id"))
         except Exception as e:
             st.error(f"No se pudo leer Drive: {error_google(e)}")
             reportes = []
@@ -2104,7 +2150,7 @@ with col_drive:
                     servicio_drive = build("drive", "v3", credentials=credenciales_google())
                     # cada reporte va a su carpeta Estación/Equipo dentro de la carpeta principal
                     ruta_drive = ["Diagnósticos", codigo_equipo()] if es_diagnostico else [estacion_sel, codigo_equipo()]
-                    carpeta_reporte = carpeta_drive(servicio_drive, st.secrets["drive_carpeta_id"], ruta_drive)
+                    carpeta_reporte = carpeta_drive(servicio_drive, secreto("drive_carpeta_id"), ruta_drive)
                     pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta_reporte)
                     enlace = pdf_subido.get("webViewLink", "")
                     st.success(f"✅ PDF guardado en Drive en {' / '.join(ruta_drive)} como: {nombre_del_pdf}")
@@ -2120,7 +2166,7 @@ with col_drive:
                               f"con fecha de servicio {fecha_ref}.\n"
                               + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "")
                               + "\nSaludos.")
-                    enviar_correo(servicio_gmail, st.secrets["correo_coordinador"],
+                    enviar_correo(servicio_gmail, secreto("correo_coordinador"),
                                   (f"Diagnóstico de equipo {gas_txt} - N/S {num_serie_val} - {fecha_ref} - {origen_archivo}" if es_diagnostico
                                    else f"Formato de calibración {gas_txt} - {estacion_sel} - {fecha_ref} - {origen_archivo}"), cuerpo,
                                   [(nombre_del_pdf, pdf_bytes, "application/pdf")])

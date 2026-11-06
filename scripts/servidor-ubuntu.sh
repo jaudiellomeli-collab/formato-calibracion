@@ -127,14 +127,21 @@ fi
 
 # Sin el archivo, Docker montaria una carpeta vacia en su lugar y Streamlit no
 # arrancaria. Se crea desde la plantilla y se avisa para llenarlo.
+# Los secretos pueden ir en .env (GOOGLE_REFRESH_TOKEN, DRIVE_CARPETA_ID...) o en
+# .streamlit/secrets.toml; la app usa primero .env. El archivo .toml se crea
+# siempre (aunque quede vacio) porque docker-compose lo monta.
 mkdir -p .streamlit
+secretos_en_env=no
+[ -n "$(valor GOOGLE_REFRESH_TOKEN)" ] && secretos_en_env=si
 if [ ! -f .streamlit/secrets.toml ]; then
   cp secrets.toml.example .streamlit/secrets.toml
   chmod 600 .streamlit/secrets.toml
-  aviso "Cree .streamlit/secrets.toml desde la plantilla. Llenalo (Drive, correo y llaves de Google)"
-  aviso "y luego: docker compose restart formato"
-elif grep -qE '^[[:space:]]*refresh_token[[:space:]]*=[[:space:]]*""' .streamlit/secrets.toml; then
-  aviso ".streamlit/secrets.toml sigue con refresh_token vacio: la app no guardara en Drive ni mandara correo."
+  if [ "$secretos_en_env" = no ]; then
+    aviso "Cree .streamlit/secrets.toml desde la plantilla. Llena los secretos ahi o en .env (ver .env.example)"
+    aviso "y luego: docker compose restart formato"
+  fi
+elif [ "$secretos_en_env" = no ] && grep -qE '^[[:space:]]*refresh_token[[:space:]]*=[[:space:]]*""' .streamlit/secrets.toml; then
+  aviso "Sin refresh_token en .env ni en .streamlit/secrets.toml: la app no guardara en Drive ni mandara correo."
 fi
 # El contenedor corre como el usuario 10001 y tiene que poder leerlo.
 sudo chown 10001 .streamlit/secrets.toml

@@ -13,7 +13,7 @@ Al terminar queda en:
 
 ```
 Internet ──HTTPS──> nginx del servidor ──/formato-calibracion/──> 127.0.0.1:8084 ──> contenedor (Streamlit :8501)
-                                                                                      └─ lee .streamlit/secrets.toml (solo lectura)
+                                                                                      └─ lee .env y, si falta algo, .streamlit/secrets.toml
 ```
 
 - Un solo contenedor con Streamlit. **No usa MySQL ni guarda nada en disco**:
@@ -55,6 +55,23 @@ cd formato-calibracion
 
 ### 2. Llenar los secretos
 
+La app acepta los secretos en **`.env`** o en **`.streamlit/secrets.toml`**.
+Si un dato está en los dos, gana `.env`. Elige uno:
+
+**Opción A, `.env` (recomendada en el servidor):**
+
+```bash
+cp .env.example .env
+chmod 600 .env
+nano .env
+```
+
+Llena `DRIVE_CARPETA_ID`, `CORREO_COORDINADOR`, `CLAVE_COORDINACION`,
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REFRESH_TOKEN`. El
+instalador agrega después `FORMATO_PUBLICAR` y `RUTA_BASE` sin borrar lo demás.
+
+**Opción B, `secrets.toml`:**
+
 ```bash
 mkdir -p .streamlit
 cp secrets.toml.example .streamlit/secrets.toml
@@ -62,6 +79,8 @@ nano .streamlit/secrets.toml
 ```
 
 Llena `drive_carpeta_id`, `correo_coordinador` y el bloque `[google_oauth]`.
+Aunque uses la opción A, `.streamlit/secrets.toml` debe existir (puede quedar
+vacío) porque `docker-compose.yml` lo monta; el instalador lo crea.
 El `refresh_token` se obtiene **una sola vez, en tu computadora** (abre el
 navegador para autorizar):
 
@@ -137,12 +156,14 @@ avanza (`--ff-only`) y se detiene si encuentra cambios locales.
 
 ## Tareas comunes
 
-**Cambiar un secreto** (el archivo es del usuario del contenedor, por eso va
-con `sudo`):
+**Cambiar un secreto:** edita `.env` o `.streamlit/secrets.toml` (este último
+es del usuario del contenedor, por eso va con `sudo`). Con `.env` hay que
+recrear el contenedor para que tome los valores nuevos:
 
 ```bash
-sudo nano .streamlit/secrets.toml
-docker compose restart formato
+nano .env && docker compose up -d
+# o bien
+sudo nano .streamlit/secrets.toml && docker compose restart formato
 ```
 
 **Reiniciar / detener / levantar:**
@@ -166,7 +187,7 @@ docker compose up -d --build
 | La página se queda en «Please wait...» | nginx no deja pasar el WebSocket. Revisa que `/etc/nginx/snippets/formato-calibracion.conf` tenga `Upgrade` y `Connection "upgrade"` y que el sitio lo incluya: `sudo nginx -t && sudo systemctl reload nginx`. |
 | 404 en `/formato-calibracion/` | `RUTA_BASE` en `.env` no coincide con la carpeta de nginx (va sin diagonal: `RUTA_BASE=formato-calibracion`). Corrige y `docker compose up -d`. |
 | 502 Bad Gateway | El contenedor no está arriba: `docker compose ps` y `docker compose logs formato`. |
-| «Faltan credenciales de Google en Secrets.» o no sube a Drive | `.streamlit/secrets.toml` vacío o con datos mal. Revisa y reinicia. Si el `refresh_token` caducó, vuelve a generarlo con `obtener_token_google.py`. |
+| «Faltan credenciales de Google en Secrets.» o no sube a Drive | Faltan datos en `.env` y en `.streamlit/secrets.toml`, o están mal. Revisa y `docker compose up -d`. Si el `refresh_token` caducó, vuelve a generarlo con `obtener_token_google.py`. |
 | El contenedor no arranca: «is a directory» | No existía `.streamlit/secrets.toml` y Docker creó una carpeta. Bórrala (`sudo rm -r .streamlit/secrets.toml`), copia la plantilla y repite el paso 3. |
 | Fotos que no suben | Pesan más de 50 MB (límite de nginx y de Streamlit). |
 
@@ -177,8 +198,9 @@ docker compose up -d --build
 | `Dockerfile` | Imagen de la app (Python 3.12 + Streamlit, usuario sin privilegios). |
 | `docker-compose.yml` | El servicio, su puerto y el montaje de los secretos. |
 | `secrets.toml.example` | Plantilla de `.streamlit/secrets.toml`. |
+| `.env.example` | Plantilla de `.env` con los secretos. |
 | `deploy/nginx/formato-ubicacion.conf` | La carpeta en nginx (WebSocket, tiempos, tamaño de subida). |
 | `deploy/nginx/formato.conf` | Sitio propio, solo si el dominio no tiene uno. |
 | `scripts/servidor-ubuntu.sh` | Instalador. |
 | `scripts/actualizar.sh` | Actualización automática con regreso a la versión anterior. |
-| `.env` | Puerto y carpeta. Lo crea el instalador; no se versiona. |
+| `.env` | Puerto, carpeta y (opcional) los secretos. Lo crea el instalador; no se versiona. |
