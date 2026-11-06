@@ -887,6 +887,17 @@ def fila_regla(param, unit, ideal_str, min_val, max_val, key):
     tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(val_ini), _res(r_ini), Caja(val_fin), _res(r_fin)], PESOS_PG)
     return r_ini, r_fin
 
+def fila_registro(param, unit, key, ideal_str="-"):
+    """Valor numérico que solo se registra: sin rango definido no se evalúa Cumple / NO CUMPLE."""
+    c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
+    with c1: st.write(param)
+    with c2: st.write(unit)
+    with c3: st.write(ideal_str)
+    with c4: v_ini = st.number_input("ini", format="%.4f", key=f"ini_{key}", label_visibility="collapsed", value=None)
+    with c6: v_fin = st.number_input("fin", format="%.4f", key=f"fin_{key}", label_visibility="collapsed", value=None)
+    tabla_pdf(S_PG, "", ENC_PG, [param, unit, ideal_str, Caja(v_ini), "", Caja(v_fin), ""], PESOS_PG)
+    return None, None
+
 def fila_libre(param, unit, ideal_str, key):
     c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 1, 1, 1.5, 1.5, 1.5, 1.5])
     with c1: st.write(param)
@@ -1202,8 +1213,10 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         fila_libre("Rango de operación", "ug/m3", "0 - 1000", "th_rango")
         fila_libre("Tiempo de integración", "Minutos", "20", "th_tint")
         procesar_resultado(*fila_regla("Flujo Nominal", "L/min", "16.67", 16.00, 17.34, "th_fnom"))
-        procesar_resultado(*fila_regla("Braw", "N/A", "5000 - 20000", 5000.0, 20000.0, "th_braw"))
-        procesar_resultado(*fila_regla("Bzero", "N/A", "0", -500.0, 500.0, "th_bzero")) 
+        # El manual del 5014i no fija rango para Beta Raw (límites de alarma del usuario) ni para Beta Zero (salida de 0 a 65,000):
+        # se registran sin evaluar Cumple / NO CUMPLE
+        fila_registro("Braw", "N/A", "th_braw")
+        fila_registro("Bzero", "N/A", "th_bzero")
         procesar_resultado(*fila_regla("Alpha", "N/A", "0 - 100", 0.0, 100.0, "th_alpha"))
         procesar_resultado(*fila_regla("Temperatura Ambiental", "°C", "4 - 50", 4.0, 50.0, "th_tamb"))
         procesar_resultado(*fila_regla("Presión Barométrica", "mmHg", "400 - 800", 400.0, 800.0, "th_pbaro"))
@@ -1610,6 +1623,14 @@ COMPONENTES_BAM = [("Gabinete", "bam_c_gab"), ("Tubo de la traza", "bam_c_tub"),
                    ("Fugas", "bam_c_fugas"), ("Fuente de voltaje", "bam_c_fvolt"), ("Cinta de vidrio / filtro", "bam_c_cinta"),
                    ("Bomba de vacío", "bam_c_bomba"), ("Sistema neumático y O-rings", "d_orings_pm"),
                    ("Sensores de humedad / temperatura", "d_sensores")]
+# Thermo 5014i: la misma tabla única que el BAM (antes eran filas de texto de Limpieza de / Revisión de / Reemplazo de)
+COMPONENTES_THERMO = [("Gabinete", "th_c_gab"), ("Tubo de la traza", "th_c_tub"), ("Cabezal", "th_c_cab"),
+                      ("Cortador de partículas", "th_c_cort"), ("Tarjetas electrónicas", "th_c_tarj"), ("Ventiladores", "th_c_vent"),
+                      ("Celda de medición", "th_c_celd"), ("Display", "th_c_disp"), ("Calefactor de la traza", "th_c_calf"),
+                      ("Traza", "th_c_traza"), ("Fugas", "th_c_fugas"), ("Fuente de voltaje", "th_c_fvolt"),
+                      ("Ventilador de fuente", "th_c_vfuente"), ("Cinta de vidrio / filtro", "th_c_cinta"),
+                      ("Rodamiento de celda", "th_c_rod"), ("Bomba de vacío", "th_c_bomba"),
+                      ("Sistema neumático y O-rings", "d_orings_pm"), ("Sensores de humedad / temperatura", "d_sensores")]
 
 def bloque_revision_detallada():
     """Función para encapsular la sección Detallada y moverla dinámicamente."""
@@ -1703,45 +1724,16 @@ with st.expander("🔍 LIMPIEZA, REVISIÓN Y REEMPLAZO", expanded=req_basico):
             fila_comp("Mangueras", "b_mang_so2")
             fila_comp("Lámpara UV", "b_lamp_so2")
     
-    elif es_bam:
+    elif es_particulas:  # BAM y Thermo: limpieza, revisión, reemplazo y revisión detallada en una sola tabla
         if con_fotos:
             renderizar_fotos_seccion(S_LIM, "📷 Evidencias de Mantenimiento y Componentes", "fot_lim", multiple=True)
             st.divider()
         encabezado_componentes()
-        for nombre_comp, key_comp in COMPONENTES_BAM:
+        for nombre_comp, key_comp in (COMPONENTES_BAM if es_bam else COMPONENTES_THERMO):
             fila_comp(nombre_comp, key_comp)
 
-    elif es_thermo:
-        st.markdown("<div class='header-tabla'>Limpieza de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Limpieza de:"
-        fila_simple("Gabinete", "limp_gab")
-        fila_simple("Tubo de la traza", "limp_tub")
-        fila_simple("Cabezal", "limp_cab")
-        if es_thermo: fila_simple("Cortador de Partículas", "limp_cort")
-        fila_simple("Tarjetas Electrónicas" if es_thermo else "Tarjetas", "limp_tarj")
-        fila_simple("Ventiladores" if es_thermo else "Ventilador", "limp_vent")
-        fila_simple("Celda de medición", "limp_celd")
-
-        st.markdown("<div class='header-tabla'>Revisión de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Revisión de:"
-        fila_simple("Display", "rev_disp", "En óptimas condiciones")
-        fila_simple("Calefactor de la Traza / factor de la Traza", "rev_calf", "Opera correctamente")
-        fila_simple("Traza", "rev_traza", "En óptimas condiciones")
-        fila_simple("Fugas", "rev_fugas", "Ninguna")
-        fila_simple("Fuente de voltaje", "rev_fvolt", "Opera correctamente")
-        fila_simple("Cinta de vidrio / filtro", "rev_cinta", "Tiene 1/2 de cinta disponible")
-        if es_thermo: fila_simple("Rodamiento de celda", "rev_rod", "En óptimas condiciones")
-        fila_simple("Bomba", "rev_bomba", "Opera correctamente")
-
-        st.markdown("<div class='header-tabla'>Reemplazo (en caso de ser necesario) de:</div>", unsafe_allow_html=True)
-        pdf_ctx["sub"] = "Reemplazo (en caso de ser necesario) de:"
-        if es_thermo: fila_simple("Ventilador de fuente", "reemp_vent")
-        fila_simple("Cinta de vidrio / filtro", "reemp_cinta")
-        if es_bam: fila_simple("O-rings", "reemp_orings")
-        fila_simple("Bomba de Vacío", "reemp_bomba")
-
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
-if es_externo and not es_bam:  # en los BAM la revisión detallada va dentro de Limpieza, revisión y reemplazo
+if es_externo and not es_particulas:  # en BAM y Thermo la revisión detallada va dentro de Limpieza, revisión y reemplazo
     bloque_revision_detallada()
 
 # ==========================================
@@ -1962,7 +1954,7 @@ if es_gas:
             renderizar_fotos_seccion(S_MUL, "📷 Gráfica de Calibración Multipunto (Envidas y analizador)", "fot_mul", multiple=True, desc_default="Gráfica Multipunto Envidas")
 
 # (!!!) LÓGICA CONDICIONAL DE LA SECCIÓN DETALLADA
-if not es_externo and not es_bam:
+if not es_externo and not es_particulas:
     bloque_revision_detallada()
 
 # ==========================================
