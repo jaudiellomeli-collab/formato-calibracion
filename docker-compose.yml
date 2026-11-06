@@ -1,7 +1,8 @@
 # Formato de calibracion SIMAJ en un servidor.
 #
-#   1. Copia la plantilla de secretos y llenala:
-#        cp secrets.toml.example .streamlit/secrets.toml
+#   1. Llena los secretos en .env (cp .env.example .env) o en
+#      .streamlit/secrets.toml (cp secrets.toml.example .streamlit/secrets.toml).
+#      La app usa primero .env. El .toml debe existir aunque este vacio.
 #   2. docker compose up -d --build
 #
 # En el servidor Ubuntu lo hace todo scripts/servidor-ubuntu.sh, que ademas
@@ -20,6 +21,9 @@ services:
     container_name: formato-calibracion
     restart: unless-stopped
     init: true
+    # Secretos de la app (DRIVE_CARPETA_ID, CORREO_COORDINADOR, GOOGLE_*...).
+    # La app los usa antes que .streamlit/secrets.toml; ver .env.example.
+    env_file: .env
     environment:
       # Carpeta del sitio detras de nginx, sin diagonales (formato-calibracion).
       STREAMLIT_SERVER_BASE_URL_PATH: ${RUTA_BASE:-}
