@@ -680,12 +680,12 @@ if st.session_state.get("_coord_ok") and st.session_state.get("_coord_panel"):
 # ==========================================
 # BASES DE DATOS DE EQUIPOS Y SERIES
 # ==========================================
-equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948"}
-equipos_nox = {"Pintas": "24-0179", "Santa Fe": "24-0579", "Miravalle": "24-0587", "Centro": "24-0595", "Country": "23-2360", "Atemajac": "24-0705", "Oblatos": "24-0710", "Santa Margarita": "24-0570", "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700"}
-equipos_co = {"Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395"}
-equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763"}
-equipos_pm10 = {"Pintas": "CM17461024", "Santa Fe": "DN16867", "Miravalle": "DN16862", "Centro": "DN17077", "Country": "G3448", "Atemajac": "", "Oblatos": "", "Santa Margarita": "EN12458", "Vallarta": "5014i203241211", "Loma Dorada": "5014i203171211", "Águilas": "EN12457", "Santa Anita": "EN12289", "Tlaquepaque": "CM18091003"}
-equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": "DN17070", "Centro": "DN16864", "Country": "N14028", "Atemajac": "", "Oblatos": "", "Santa Margarita": "", "Vallarta": "5014i203131210", "Loma Dorada": "", "Águilas": "EN12462", "Santa Anita": "EN12291", "Tlaquepaque": ""}
+equipos_o3 = {"Pintas": "24-0305", "Santa Fe": "24-0307", "Miravalle": "24-0302", "Centro": "23-1564", "Country": "23-2319", "Atemajac": "24-0385", "Oblatos": "24-0766", "Santa Margarita": "24-0387", "Vallarta": "24-0388", "Loma Dorada": "24-0941", "Águilas": "24-0768", "Santa Anita": "24-0333", "Tlaquepaque": "24-0948", "COM": ""}
+equipos_nox = {"Pintas": "24-0179", "Santa Fe": "24-0579", "Miravalle": "24-0587", "Centro": "24-0595", "Country": "23-2360", "Atemajac": "24-0705", "Oblatos": "24-0710", "Santa Margarita": "24-0570", "Vallarta": "24-0592", "Loma Dorada": "24-0709", "Águilas": "24-0594", "Santa Anita": "24-0182", "Tlaquepaque": "24-0700", "COM": ""}
+equipos_co = {"Pintas": "24-1119", "Santa Fe": "24-1120", "Miravalle": "24-0169", "Centro": "24-0152", "Country": "24-0151", "Atemajac": "24-0146", "Oblatos": "24-1121", "Santa Margarita": "24-0399", "Loma Dorada": "24-1122", "Águilas": "ML9830 155", "Santa Anita": "24-0395", "COM": ""}
+equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762", "Oblatos": "17-1765", "Tlaquepaque": "17-1763", "COM": ""}
+equipos_pm10 = {"Pintas": "CM17461024", "Santa Fe": "DN16867", "Miravalle": "DN16862", "Centro": "DN17077", "Country": "G3448", "Atemajac": "", "Oblatos": "", "Santa Margarita": "EN12458", "Vallarta": "5014i203241211", "Loma Dorada": "5014i203171211", "Águilas": "EN12457", "Santa Anita": "EN12289", "Tlaquepaque": "CM18091003", "COM": ""}
+equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": "DN17070", "Centro": "DN16864", "Country": "N14028", "Atemajac": "", "Oblatos": "", "Santa Margarita": "", "Vallarta": "5014i203131210", "Loma Dorada": "", "Águilas": "EN12462", "Santa Anita": "EN12291", "Tlaquepaque": "", "COM": ""}
 
 # ==========================================
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
@@ -1017,9 +1017,15 @@ with st.expander("🛠 DATOS DEL ANALIZADOR Y CONDICIONES AMBIENTALES", expanded
         kv(S_DAT, "Modelo", mod_capturado)
         
         if not es_diagnostico:
-            num_serie_val = equipos_act.get(estacion_sel, "")
-            ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
-            kv(S_DAT, "N/S (Automático)", ns_capturado)
+            if estacion_sel == "COM":
+                # la estación COM no tiene un número de serie fijo: se captura a mano (y es obligatorio)
+                num_serie_val = st.text_input("N/S (captura manual) *", key="ns_com", placeholder="Ej. 23-1564 o 5014i203241211").strip()
+                ns_capturado = num_serie_val
+                kv(S_DAT, "N/S del equipo", ns_capturado)
+            else:
+                num_serie_val = equipos_act.get(estacion_sel, "")
+                ns_capturado = st.text_input("N/S (Automático)", value=num_serie_val, disabled=True)
+                kv(S_DAT, "N/S (Automático)", ns_capturado)
         
         presion_amb = kv(S_DAT, "Presión ambiental ÚNICA (Torr)", st.number_input("Presión ambiental ÚNICA (Torr)", format="%.4f", value=634.0, key="presion_unica"))
         aviso_rango(presion_amb, 600, 680, "Presión ambiental", "Torr")
@@ -2052,7 +2058,7 @@ def nombre_base_archivo():
         "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN",
         "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM",
         "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN",
-        "Tlaquepaque": "TLA"
+        "Tlaquepaque": "TLA", "COM": "COM"
     }
     est_cod = estaciones_abrev.get(estacion_sel, "XXX")
     gas_cod = codigo_equipo()
@@ -2071,6 +2077,8 @@ CAMPOS_OBLIGATORIOS = [("n_tec", "Nombre del Técnico / Operador"), ("n_sup", "N
 if es_diagnostico:
     CAMPOS_OBLIGATORIOS = [("dx_ns", "N/S del equipo"), ("dx_falla_rep", "Falla reportada"), ("dx_falla_enc", "Falla encontrada"),
                            ("dx_motivo", "Motivo del resultado del diagnóstico")] + CAMPOS_OBLIGATORIOS
+if estacion_sel == "COM":  # en Diagnóstico la estación es "Sin estación", así que no aplica
+    CAMPOS_OBLIGATORIOS = [("ns_com", "N/S del equipo")] + CAMPOS_OBLIGATORIOS
 faltantes = [etiqueta for k, etiqueta in CAMPOS_OBLIGATORIOS if not str(st.session_state.get(k) or "").strip()]
 if es_diagnostico and st.session_state.get("dx_funciona") not in OPC_FUNCIONA[1:]:
     faltantes.insert(4, "¿El equipo queda funcionando?")
