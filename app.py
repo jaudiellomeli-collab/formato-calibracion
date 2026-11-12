@@ -758,8 +758,8 @@ if gas_sel == "Ozono (O3)":
     flujo_ideal_vol = 500; flujo_tol = 0.025; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Óxidos de Nitrógeno (NOx)": 
     equipos_act = equipos_nox; modelo_analizador = "Serinus 40"
-    # Serinus 40: el flujo volumétrico debe quedar entre 600 y 630 cc/min (criterio SIMAJ)
-    flujo_ideal_vol = 615; flujo_rango = (600.0, 630.0); flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
+    # Serinus 40: el flujo volumétrico debe quedar entre 600 y 700 cc/min (criterio SIMAJ)
+    flujo_ideal_vol = 615; flujo_rango = (600.0, 700.0); flujo_tol = 0.05; cero_tol = 0.003; puntos_multipunto = [0.400, 0.300, 0.200, 0.100, 0.0]; span_gen_default = 0.400
 elif gas_sel == "Monóxido de Carbono (CO)": 
     equipos_act = equipos_co; modelo_analizador = "Serinus 30"
     flujo_ideal_vol = 1000; flujo_tol = 0.025; cero_tol = 0.5; puntos_multipunto = [40.0, 30.0, 20.0, 10.0, 0.0]; span_gen_default = 40.0
@@ -1149,7 +1149,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
         
     elif gas_sel == "Óxidos de Nitrógeno (NOx)":
         fila_libre("Flujo Estándar", "scc/min", "650", "nox_f_est")
-        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "600 - 630", 600.0, 630.0, "nox_f_vol"))
+        procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "600 - 700", 600.0, 700.0, "nox_f_vol"))
         procesar_resultado(*fila_regla("Presión de gas", "Torr", "80-300", 80.0, 300.0, "nox_p_gas"))
         procesar_resultado(*fila_regla("Temp. celda de reaccion", "°C", "50 ±10%", 45.0, 55.0, "nox_t_celda"))
         procesar_resultado(*fila_regla("Temp. del convertidor", "°C", "250-335", 250.0, 335.0, "nox_t_conv"))
