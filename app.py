@@ -1137,7 +1137,7 @@ with st.expander("📊 REVISIÓN DE PARÁMETROS GENERALES", expanded=req_basico)
     if gas_sel == "Ozono (O3)":
         fila_libre("Flujo Estándar", "scc/min", "500", "o3_f_est")
         procesar_resultado(*fila_regla("Flujo Volumétrico", "cc/min", "500", 487.5, 512.5, "o3_f_vol"))
-        procesar_resultado(*fila_regla("Presión de gas", "Torr", "629", 619.0, 630.0, "o3_p_gas"))
+        procesar_resultado(*fila_regla("Presión de gas", "Torr", "629", 615.0, 640.0, "o3_p_gas"))
         procesar_resultado(*fila_regla("Voltaje de referencia", "Volts", "1.4 - 4", 1.4, 4.0, "o3_v_ref"))
         procesar_resultado(*fila_regla("Corriente de la lámpara", "mA", "9.5 - 10.5", 9.5, 10.5, "o3_c_lamp"))
         procesar_resultado(*fila_regla("Temperatura de la lámpara", "°C", "45 - 55", 45.0, 55.0, "o3_t_lamp"))
