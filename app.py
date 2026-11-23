@@ -143,6 +143,26 @@ def secrets_faltantes():
            "drive_carpeta_id": bool(secreto("drive_carpeta_id")), "correo_coordinador": bool(secreto("correo_coordinador"))}
     return [s for s in SECRETS_REQUERIDOS if not hay[s]]
 
+def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
+    media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
+    # create siempre agrega un archivo nuevo: los reportes anteriores con el mismo nombre se conservan
+    return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute(num_retries=3)
+
+def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
+    mensaje = EmailMessage()
+    mensaje["To"], mensaje["Subject"] = destinatario, asunto
+    mensaje.set_content(cuerpo)
+    for nombre, datos, mimetype in adjuntos:
+        tipo, subtipo = mimetype.split("/")
+        mensaje.add_attachment(datos, maintype=tipo, subtype=subtipo, filename=nombre)
+    crudo = base64.urlsafe_b64encode(mensaje.as_bytes()).decode()
+    servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
+
+def _segmento_archivo(texto, vacio):
+    """Parte del nombre sin caracteres no válidos en Windows, Drive o adjuntos de correo."""
+    limpio = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", str(texto)).strip(" .-")
+    return limpio or vacio
+
 def error_google(e):
     """Mensaje de error breve: tipo, código HTTP y motivo, sin la URL de la petición ni datos de las credenciales."""
     estado = getattr(getattr(e, "resp", None), "status", None)
@@ -155,6 +175,9 @@ def error_google(e):
 CLAVES_SELECTOR = ["k_tipo", "k_gas", "k_pm", "k_est"]
 # Diagnóstico de equipos que están fuera de estación (descompuestos, en laboratorio). Por ahora solo PM Thermo.
 TIPO_DIAG = "Diagnóstico de equipo (sin estación)"
+# Formatos de la estación (no de un analizador): limpieza de la caseta y mantenimiento del aire acondicionado
+TIPO_LIMP = "Limpieza de estación"
+TIPO_AA = "Mantenimiento de aire acondicionado"
 EQUIPOS_DIAG = ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"]
 CLAVES_SIN_BORRADOR = set(CLAVES_SELECTOR + ["correo_borrador", "FormSubmitter"])
 MUL_TOL_PUNTO = 0.025  # desviación máxima de cada punto de la multipunto respecto al valor del calibrador
@@ -687,6 +710,14 @@ equipos_so2 = {"Pintas": "17-1764", "Miravalle": "23-1538", "Centro": "17-1762",
 equipos_pm10 = {"Pintas": "CM17461024", "Santa Fe": "DN16867", "Miravalle": "DN16862", "Centro": "DN17077", "Country": "G3448", "Atemajac": "", "Oblatos": "", "Santa Margarita": "EN12458", "Vallarta": "5014i203241211", "Loma Dorada": "5014i203171211", "Águilas": "EN12457", "Santa Anita": "EN12289", "Tlaquepaque": "CM18091003"}
 equipos_pm25 = {"Pintas": "5014i203251211", "Santa Fe": "DN17069", "Miravalle": "DN17070", "Centro": "DN16864", "Country": "N14028", "Atemajac": "", "Oblatos": "", "Santa Margarita": "", "Vallarta": "5014i203131210", "Loma Dorada": "", "Águilas": "EN12462", "Santa Anita": "EN12291", "Tlaquepaque": ""}
 
+ESTACIONES_TODAS = sorted(set().union(*[d.keys() for d in (equipos_o3, equipos_nox, equipos_co, equipos_so2, equipos_pm10, equipos_pm25)]))
+ABREV_ESTACION = {
+    "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN",
+    "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM",
+    "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN",
+    "Tlaquepaque": "TLA"
+}
+
 # ==========================================
 # MENÚ SUPERIOR HORIZONTAL Y LOGO
 # ==========================================
@@ -694,10 +725,11 @@ st.write("<br>", unsafe_allow_html=True)
 # Los selectores van en contenedores con clave para ocultarlos al imprimir y mostrar en su lugar un resumen legible
 with st.container(key="selector_servicio"):
     st.markdown("#### Selecciona el Tipo de Servicio:")
-    tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo", TIPO_DIAG], horizontal=True,
+    tipo_servicio = st.radio("Selecciona el Tipo de Servicio:", ["Selecciona una opción...", "SIMAJ", "Mantenimiento Externo", TIPO_DIAG, TIPO_LIMP, TIPO_AA], horizontal=True,
                              key="k_tipo", label_visibility="collapsed", on_change=limpiar_formulario)
     es_externo = (tipo_servicio == "Mantenimiento Externo")
     es_diagnostico = (tipo_servicio == TIPO_DIAG)
+    es_formato_estacion = tipo_servicio in (TIPO_LIMP, TIPO_AA)
 
     if tipo_servicio == "Selecciona una opción...":
         st.warning("⚠️ Selecciona el tipo de mantenimiento para habilitar el formato.")
@@ -728,20 +760,24 @@ with col_logo:
     if os.path.exists("simaj.png"): st.image("simaj.png", width=250)
     else: st.markdown("<h1 style='color:#00B2A9;'>SIMAJ</h1>", unsafe_allow_html=True)
 
-with col_menu, st.container(key="selector_equipo"):
-    opciones_equipo = EQUIPOS_DIAG if es_diagnostico else ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"]
-    if st.session_state.get("k_gas") not in opciones_equipo:
-        st.session_state["k_gas"] = opciones_equipo[0]
-    st.markdown("#### Selecciona el Equipo a Diagnosticar:" if es_diagnostico else "#### Selecciona el Equipo a Calibrar:")
-    gas_sel = st.radio("Selecciona el Equipo:", opciones_equipo,
-                       horizontal=True, label_visibility="collapsed", key="k_gas", on_change=limpiar_formulario)
-    pm_tipo = "N/A"
-    if gas_sel in ["PM BAM", "PM Thermo"]:
-        pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm", on_change=limpiar_formulario)
+if es_formato_estacion:
+    gas_sel, pm_tipo = "", "N/A"
+    st.markdown(f"<div class='resumen-servicio'><b>Tipo de formato:</b> {tipo_servicio}</div>", unsafe_allow_html=True)
+else:
+    with col_menu, st.container(key="selector_equipo"):
+        opciones_equipo = EQUIPOS_DIAG if es_diagnostico else ["Ozono (O3)", "Óxidos de Nitrógeno (NOx)", "Monóxido de Carbono (CO)", "Dióxido de Azufre (SO2)", "PM BAM", "PM Thermo"]
+        if st.session_state.get("k_gas") not in opciones_equipo:
+            st.session_state["k_gas"] = opciones_equipo[0]
+        st.markdown("#### Selecciona el Equipo a Diagnosticar:" if es_diagnostico else "#### Selecciona el Equipo a Calibrar:")
+        gas_sel = st.radio("Selecciona el Equipo:", opciones_equipo,
+                           horizontal=True, label_visibility="collapsed", key="k_gas", on_change=limpiar_formulario)
+        pm_tipo = "N/A"
+        if gas_sel in ["PM BAM", "PM Thermo"]:
+            pm_tipo = st.radio("Selecciona el Parámetro de Partículas:", ["PM10", "PM2.5"], horizontal=True, key="k_pm", on_change=limpiar_formulario)
 
-texto_servicio = tipo_servicio + (f" (realizado por: {quien_externo})" if es_externo or es_diagnostico else "")
-texto_equipo = gas_sel if pm_tipo == "N/A" else f"{gas_sel} ({pm_tipo})"
-st.markdown(f"<div class='resumen-servicio'><b>Tipo de servicio:</b> {texto_servicio} &nbsp;|&nbsp; <b>Equipo:</b> {texto_equipo}</div>", unsafe_allow_html=True)
+    texto_servicio = tipo_servicio + (f" (realizado por: {quien_externo})" if es_externo or es_diagnostico else "")
+    texto_equipo = gas_sel if pm_tipo == "N/A" else f"{gas_sel} ({pm_tipo})"
+    st.markdown(f"<div class='resumen-servicio'><b>Tipo de servicio:</b> {texto_servicio} &nbsp;|&nbsp; <b>Equipo:</b> {texto_equipo}</div>", unsafe_allow_html=True)
 
 st.divider()
 datos_resumen = {}
@@ -796,7 +832,11 @@ etq_empresa_tec = "Empresa proveedora" if es_proveedor else "Institución"
 # ==========================================
 # ENCABEZADO
 # ==========================================
-if es_diagnostico:
+if tipo_servicio == TIPO_LIMP:
+    titulo_formato, subtitulo_formato = "REPORTE DE LIMPIEZA DE ESTACIÓN", "Estación de monitoreo - Limpieza de caseta y exteriores"
+elif tipo_servicio == TIPO_AA:
+    titulo_formato, subtitulo_formato = "REPORTE DE MANTENIMIENTO PREVENTIVO DE AIRE ACONDICIONADO", "Estación de monitoreo - Equipo de aire acondicionado (F-GCA-019)"
+elif es_diagnostico:
     titulo_formato = f"FORMATO DE DIAGNÓSTICO {gas_sel}" if es_gas else f"FORMATO DE DIAGNÓSTICO {gas_sel} ({pm_tipo})"
     subtitulo_formato = "Diagnóstico de equipo fuera de estación - Monitor de " + ("Gases" if es_gas else "Partículas")
 else:
@@ -983,6 +1023,254 @@ def renderizar_fotos_seccion(seccion_id, titulo, key_prefix, multiple=True, desc
                     desc_foto = st.text_area("Descripción:", value=desc_default, key=f"desc_fot_{key_prefix}_{ident}",
                                              placeholder="Ej. Detalle...", height="content")
                     _sec(seccion_id)["fotos"].append((datos, desc_foto))
+
+# ==========================================
+# FORMATOS DE ESTACIÓN: LIMPIEZA DE ESTACIÓN Y MANTENIMIENTO DE AIRE ACONDICIONADO
+# Usan el mismo PDF, firmas, fotos y respaldo en Drive que los formatos de calibración.
+# ==========================================
+S_LE_DAT = "Datos de la estación"
+S_LE_ACT = "Actividades de limpieza"
+S_AA_DAT = "Datos del equipo de aire acondicionado"
+S_AA_LIM = "Limpieza del equipo"
+S_AA_VER = "Verificación y ajustes"
+S_AA_PAR = "Parámetros finales"
+S_EV = "Evidencia fotográfica"
+S_OBF = "Observaciones y firmas"
+
+ACTIVIDADES_LIMPIEZA = [
+    ("Dentro de la caseta", [("Sacudir y barrer", "le_barrer"), ("Manifold", "le_manifold"),
+                             ("Mangueras de toma de muestra", "le_mangueras"), ("Mesa de trabajo", "le_mesa")]),
+    ("Fuera de la caseta", [("Pluviómetro", "le_pluvio"), ("Cabezales", "le_cabezales"), ("Cortador", "le_cortador"),
+                            ("Filtro del ventilador del aire acondicionado (mochila)", "le_filtro_aa")]),
+]
+LIMPIEZA_AA = [("Rejillas de inyección y retorno de aire", "aa_l_rejillas"), ("Controles eléctricos", "aa_l_controles"),
+               ("Serpentines condensadores", "aa_l_condens"), ("Serpentines evaporadores", "aa_l_evapor"),
+               ("Tableros de control", "aa_l_tableros"), ("Filtros lavables", "aa_l_filtros"),
+               ("Gabinete interior", "aa_l_gab_int"), ("Gabinete exterior", "aa_l_gab_ext")]
+VERIFICACION_AA = [("Tornillería", "aa_v_tornill"), ("Reapriete de conexiones eléctricas y tornillería", "aa_v_reapriete"),
+                   ("Válvulas", "aa_v_valvulas"), ("Mangueras", "aa_v_mangueras"), ("Fugas", "aa_v_fugas"),
+                   ("Aislamiento de tubería armaflex", "aa_v_armaflex"), ("Contactores", "aa_v_contact"),
+                   ("Relevadores encapsulados", "aa_v_relev"), ("Interruptor termomagnético", "aa_v_termomag"),
+                   ("Microprocesador / tarjeta procesadora", "aa_v_micro"), ("Transformadores", "aa_v_transf"),
+                   ("Retardadores de tiempo", "aa_v_retard"), ("Termostato", "aa_v_termost"),
+                   ("Lubricación de motores (chumaceras, baleros, flechas y eje)", "aa_v_lubric"),
+                   ("Sistema de refrigeración", "aa_v_refrig"), ("Vibración del equipo", "aa_v_vibra"),
+                   ("Peinado de serpentines de condensadoras (equipos paquete / mochila)", "aa_v_peinado"),
+                   ("Revisión del sistema de control", "aa_v_control")]
+TIPOS_AA = ["Aire de ventana", "Aire de mochila", "Aire mini split"]
+# Equipos de aire acondicionado conocidos por estación: se precargan y se pueden corregir
+EQUIPOS_AA = {"Santa Margarita": {"aa_marca": "Marvair", "aa_modelo": "SAA1024AA050N-21EAC31", "aa_ns": "P2407P103488", "aa_tipo": "Aire de mochila"}}
+AA_TEMP_MIN, AA_TEMP_MAX = 22.0, 24.0  # confort ASHRAE en áreas acondicionadas
+OPC_SNA = ["Sí", "No", "N/A"]
+OPC_SN = ["Sí", "No"]
+
+def _ver_sn(v):
+    return {"Sí": "Sí ✅", "No": "No", "N/A": "N/A"}.get(v, v)
+
+def fila_actividad(seccion, grupo, nombre, key, opciones=OPC_SNA, encabezado=("Actividad", "Realizada", "Observaciones")):
+    """Actividad con respuesta obligatoria (Sí / No / N/A) y observaciones. Devuelve la respuesta (None si falta)."""
+    c1, c2, c3 = st.columns([2.2, 1.7, 3], vertical_alignment="center")
+    c1.write(nombre)
+    resp = c2.radio(nombre, opciones, index=None, horizontal=True, key=key, label_visibility="collapsed", format_func=_ver_sn)
+    obs = c3.text_input("Observaciones", key=f"obs_{key}", label_visibility="collapsed", placeholder="Observaciones...")
+    tabla_pdf(seccion, grupo, list(encabezado), [nombre, indicador_pdf(resp or "-"), Caja(obs)], [2.2, 1, 3], barra=bool(grupo))
+    return resp
+
+def fila_verificacion(nombre, key):
+    """Concepto del aire acondicionado: verificado (Sí/No), ajuste (Sí/No) y resultado o razón del ajuste."""
+    c1, c2, c3, c4 = st.columns([2.2, 1.2, 1.2, 2.6], vertical_alignment="center")
+    c1.write(nombre)
+    verif = c2.radio("Verificado", OPC_SN, index=None, horizontal=True, key=f"{key}_ver", label_visibility="collapsed", format_func=_ver_sn)
+    ajuste = c3.radio("Ajuste", OPC_SN, index=None, horizontal=True, key=f"{key}_aj", label_visibility="collapsed", format_func=_ver_sn)
+    obs = c4.text_input("Observaciones", key=f"obs_{key}", label_visibility="collapsed", placeholder="Resultado del ajuste o razón...")
+    tabla_pdf(S_AA_VER, "", ["Concepto", "Verificado", "Ajuste", "Observaciones"],
+              [nombre, indicador_pdf(verif or "-"), Caja(ajuste or ""), Caja(obs)], [2.2, 1, 1, 2.6])
+    return verif, ajuste
+
+def fila_parametro(nombre, unidad, key, criterio="-", rango=None):
+    """Lectura numérica; con rango se evalúa Cumple / NO CUMPLE."""
+    c1, c2, c3, c4, c5 = st.columns([2.2, 0.8, 1.4, 1.4, 1.4], vertical_alignment="center")
+    c1.write(nombre); c2.write(unidad); c3.write(criterio)
+    with c4: val = st.number_input(nombre, format="%.2f", value=None, key=key, label_visibility="collapsed")
+    with c5: ok = evaluar_y_mostrar(val, *rango) if rango else st.write("")
+    tabla_pdf(S_AA_PAR, "", ["Parámetro", "Unidad", "Criterio", "Valor", "Resultado"],
+              [nombre, unidad, criterio, Caja(val), _res(ok) if rango else ""], [2.2, 0.8, 1.4, 1.4, 1.4])
+    return val
+
+def firmas_estacion(grupos):
+    """Bloque de firmas con el mismo estilo que los formatos de calibración. grupos: [(título, [(etiqueta, key, valor)])]."""
+    _sec(S_OBF)["firmas"] = True
+    cols = st.columns(len(grupos), gap="large")
+    for col, (titulo, campos) in zip(cols, grupos):
+        with col:
+            st.markdown(f"<div class='header-firma'>{titulo}</div>", unsafe_allow_html=True)
+            for etiqueta, k, valor in campos:
+                if etiqueta == "Fecha":
+                    v = st.date_input(etiqueta, datetime.date.today(), key=k)
+                else:
+                    v = st.text_input(etiqueta, value=valor, key=k)
+                kv(S_OBF, etiqueta, v, titulo)
+            st.markdown("""<div style="display: flex; align-items: flex-end; margin-top: 30px;"><span style="font-weight: bold; margin-right: 15px;">Firma:</span><div class="linea-firma"></div></div>""", unsafe_allow_html=True)
+
+def precargar_aire():
+    """Al elegir la estación, precarga los datos del aire acondicionado conocido (solo en campos vacíos)."""
+    for k, v in EQUIPOS_AA.get(st.session_state.get("k_est"), {}).items():
+        if not st.session_state.get(k): st.session_state[k] = v
+
+def formato_estacion():
+    es_aire = tipo_servicio == TIPO_AA
+    faltan_resp = []
+
+    # --- Datos generales ---
+    sec_dat = S_AA_DAT if es_aire else S_LE_DAT
+    with st.expander("🏠 " + sec_dat.upper(), expanded=True):
+        estaciones = ["Selecciona una opción..."] + ESTACIONES_TODAS
+        if st.session_state.get("k_est") not in estaciones: st.session_state["k_est"] = estaciones[0]
+        c1, c2 = st.columns(2)
+        with c1:
+            estacion = kv(sec_dat, "Estación", st.selectbox("Estación:", estaciones, key="k_est", on_change=precargar_aire if es_aire else None))
+            fecha = kv(sec_dat, "Fecha", st.date_input("Fecha", datetime.date.today(), max_value=datetime.date.today(), key="es_fecha"))
+        with c2:
+            hora_ini = kv(sec_dat, "Hora de inicio", st.time_input("Hora de inicio", value=None, key="es_hora_ini", step=300))
+            hora_fin = kv(sec_dat, "Hora final", st.time_input("Hora final", value=None, key="es_hora_fin", step=300))
+        if hora_ini and hora_fin and hora_fin < hora_ini:
+            st.warning("⚠️ La hora final es anterior a la hora de inicio.")
+        if es_aire:
+            c1, c2, c3 = st.columns(3)
+            kv(sec_dat, "Marca", c1.text_input("Marca", key="aa_marca"))
+            kv(sec_dat, "Modelo", c2.text_input("Modelo", key="aa_modelo"))
+            num_serie = kv(sec_dat, "Número de serie", c3.text_input("Número de serie", key="aa_ns")).strip()
+            tipo_aa = st.radio("Tipo de aire acondicionado:", TIPOS_AA, index=None, horizontal=True, key="aa_tipo")
+            kv(sec_dat, "Tipo de aire acondicionado", tipo_aa or "")
+            if not tipo_aa: faltan_resp.append("Tipo de aire acondicionado")
+
+    if es_aire:
+        # --- Limpieza del equipo ---
+        with st.expander("🧽 LIMPIEZA DEL EQUIPO", expanded=True):
+            c1, c2, c3 = st.columns([2.2, 1.7, 3]); c1.write("**Componente**"); c2.write("**Limpieza**"); c3.write("**Observaciones**")
+            for nombre, k in LIMPIEZA_AA:
+                if fila_actividad(S_AA_LIM, "", nombre, k, OPC_SNA, ("Componente", "Limpieza", "Observaciones")) is None:
+                    faltan_resp.append(f"Limpieza: {nombre}")
+
+        # --- Verificación y ajustes ---
+        with st.expander("🔧 VERIFICACIÓN Y AJUSTES", expanded=True):
+            st.caption("Marca si se verificó cada concepto y si requirió ajuste; anota el resultado del ajuste o la razón por la que no se realizó.")
+            c1, c2, c3, c4 = st.columns([2.2, 1.2, 1.2, 2.6])
+            c1.write("**Concepto**"); c2.write("**Verificado**"); c3.write("**Ajuste**"); c4.write("**Observaciones**")
+            for nombre, k in VERIFICACION_AA:
+                verif, ajuste = fila_verificacion(nombre, k)
+                if verif is None or ajuste is None: faltan_resp.append(f"Verificación: {nombre}")
+
+        # --- Parámetros finales ---
+        with st.expander("🌡️ PARÁMETROS FINALES", expanded=True):
+            c1, c2, c3, c4, c5 = st.columns([2.2, 0.8, 1.4, 1.4, 1.4])
+            for c, t in zip((c1, c2, c3, c4, c5), ("Parámetro", "Unidad", "Criterio", "Valor", "Resultado")): c.write(f"**{t}**")
+            fila_parametro("Temperatura del área acondicionada", "°C", "aa_p_temp", f"{AA_TEMP_MIN:g} - {AA_TEMP_MAX:g} (ASHRAE)", (AA_TEMP_MIN, AA_TEMP_MAX))
+            fila_parametro("Termómetro externo", "°C", "aa_p_text")
+            fila_parametro("Sistema de control", "°C", "aa_p_tctrl")
+            fila_parametro("Presión alta", "psi", "aa_p_palta")
+            fila_parametro("Presión baja", "psi", "aa_p_pbaja")
+            fila_parametro("Corriente de arranque", "A", "aa_p_iarr")
+            fila_parametro("Corriente de trabajo", "A", "aa_p_itrab")
+            fila_parametro("Voltaje de línea", "V", "aa_p_volt")
+            st.divider()
+            c1, c2 = st.columns(2)
+            recarga = c1.radio("¿Se realizó recarga de gas?", OPC_SN, index=None, horizontal=True, key="aa_recarga", format_func=_ver_sn)
+            kg_gas = c2.number_input("Cantidad de gas (kg)", format="%.2f", value=None, key="aa_gas_kg", disabled=recarga != "Sí")
+            encendido = st.radio("¿El aire acondicionado queda encendido?", OPC_SN, index=None, horizontal=True, key="aa_encendido", format_func=_ver_sn)
+            kv(S_AA_PAR, "¿Se realizó recarga de gas?", recarga or "")
+            kv(S_AA_PAR, "Cantidad de gas (kg)", kg_gas if recarga == "Sí" else "")
+            kv(S_AA_PAR, "¿El aire acondicionado queda encendido?", Alerta(encendido, encendido == "Sí") if encendido else "")
+            if recarga is None: faltan_resp.append("¿Se realizó recarga de gas?")
+            if encendido is None: faltan_resp.append("¿El aire acondicionado queda encendido?")
+            nota = "El cambio de alguna banda dañada y la recarga de gas forman parte de este mantenimiento y no se cobran por separado. Equipo de 1 a 5 T.R.: considerar 1 kg de gas."
+            st.caption(nota); nota_pdf(S_AA_PAR, nota)
+    else:
+        # --- Actividades de limpieza de la estación ---
+        with st.expander("🧹 ACTIVIDADES DE LIMPIEZA", expanded=True):
+            for grupo, actividades in ACTIVIDADES_LIMPIEZA:
+                st.markdown(f"<div class='header-tabla'>{grupo}</div>", unsafe_allow_html=True)
+                for nombre, k in actividades:
+                    if fila_actividad(S_LE_ACT, grupo, nombre, k) is None: faltan_resp.append(f"{grupo}: {nombre}")
+
+    # --- Evidencia fotográfica ---
+    with st.expander("📷 EVIDENCIA FOTOGRÁFICA", expanded=True):
+        renderizar_fotos_seccion(S_EV, "Fotos de la estación (antes y después)" if not es_aire else "Fotos del equipo de aire acondicionado",
+                                 "fot_aa" if es_aire else "fot_le", multiple=True)
+
+    # --- Observaciones y firmas ---
+    with st.expander("✍ OBSERVACIONES Y FIRMAS", expanded=True):
+        st.markdown("**Observaciones generales**")
+        obs_gen = st.text_area("Observaciones generales", key="es_obs", label_visibility="collapsed", height="content",
+                               placeholder="Anomalías, faltantes o requerimientos (p. ej. filtro lavable, manifold dañado)...")
+        _sec(S_OBF)["textos"] = [("Observaciones generales", obs_gen, "Sin observaciones")]
+        st.write("<br>", unsafe_allow_html=True)
+        grupos = [("Realizó (SIMAJ)", [("Institución", "es_inst", "SEMADET"), ("Nombre", "es_n_simaj", ""), ("Fecha", "es_f_simaj", None)])]
+        if es_aire:
+            grupos.append(("Proveedor", [("Empresa", "es_emp_prov", ""), ("Nombre", "es_n_prov", ""), ("Fecha", "es_f_prov", None)]))
+        grupos.append(("Supervisor SEMADET", [("Cargo", "es_c_sema", "Coordinador Especializado"),
+                                              ("Nombre", "es_n_sema", "Beatriz Rodriguez Perez"), ("Fecha", "es_f_sema", None)]))
+        firmas_estacion(grupos)
+
+    st.divider()
+
+    # --- Validación, nombre del archivo y exportación ---
+    obligatorios = [("es_n_simaj", "Nombre de quien realiza (SIMAJ)"), ("es_n_sema", "Nombre del Supervisor SEMADET")]
+    if es_aire: obligatorios.insert(1, ("es_n_prov", "Nombre del proveedor"))
+    faltantes_est = [et for k, et in obligatorios if not str(st.session_state.get(k) or "").strip()]
+    faltantes_est += faltan_resp
+    sin_est = estacion == "Selecciona una opción..."
+    bloqueo = sin_est or bool(faltantes_est)
+    motivo = "Selecciona la Estación" if sin_est else ("Completa: " + ", ".join(faltantes_est[:6]) + ("..." if len(faltantes_est) > 6 else "")) if faltantes_est else None
+    if faltantes_est and not sin_est:
+        st.warning("⚠️ Para descargar o enviar el formato completa:\n\n" + "\n".join(f"- {f}" for f in faltantes_est))
+
+    codigo = "AA" if es_aire else "LE"
+    est_cod = ABREV_ESTACION.get(estacion, "XXX")
+    partes = [fecha.strftime("%Y.%m.%d"), codigo, est_cod] + ([_segmento_archivo(num_serie, "SIN-NS")] if es_aire else []) + ["SIMAJ"]
+    nombre_archivo = "_".join(partes) + ".pdf"
+    carpeta = [estacion, "Aire_acondicionado" if es_aire else "Limpieza_estacion"]
+    que = "el reporte de mantenimiento preventivo de aire acondicionado" if es_aire else "el reporte de limpieza"
+    orden = [S_AA_DAT, S_AA_LIM, S_AA_VER, S_AA_PAR, S_EV, S_OBF] if es_aire else [S_LE_DAT, S_LE_ACT, S_EV, S_OBF]
+    secciones = [(s, pdf_secciones[s]) for s in orden if s in pdf_secciones]
+
+    def pdf():
+        return construir_pdf(titulo_formato, subtitulo_formato, secciones, os.path.join(os.path.dirname(os.path.abspath(__file__)), "simaj.png"))
+
+    col_pdf, col_drive = st.columns(2, vertical_alignment="center")
+    with col_pdf:
+        st.download_button("📄 Descargar PDF del formato", data=b"" if bloqueo else pdf, file_name=nombre_archivo, mime="application/pdf",
+                           use_container_width=True, disabled=bloqueo, on_click="ignore", help=motivo)
+    with col_drive:
+        enviar = st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True, disabled=bloqueo, help=motivo)
+    if enviar:
+        faltan = secrets_faltantes()
+        if faltan:
+            st.error(f"⚠️ Faltan datos en Secrets: {', '.join(faltan)}")
+            return
+        pdf_bytes, enlace = pdf(), ""
+        with st.spinner("Subiendo el reporte a Google Drive..."):
+            try:
+                servicio_drive = build("drive", "v3", credentials=credenciales_google())
+                destino = carpeta_drive(servicio_drive, secreto("drive_carpeta_id"), carpeta)
+                enlace = subir_a_drive(servicio_drive, nombre_archivo, pdf_bytes, "application/pdf", destino).get("webViewLink", "")
+                st.success(f"✅ PDF guardado en Drive en {' / '.join(carpeta)} como: {nombre_archivo}")
+            except Exception as e:
+                st.error(f"❌ No se pudo guardar en Drive: {error_google(e)}")
+        with st.spinner("Enviando el PDF al coordinador..."):
+            try:
+                servicio_gmail = build("gmail", "v1", credentials=credenciales_google())
+                cuerpo = (f"Buen día,\n\nSe adjunta {que} de la estación {estacion}, con fecha {fecha}.\n"
+                          + (f"\nTambién está respaldado en Drive: {enlace}\n" if enlace else "") + "\nSaludos.")
+                asunto = f"{'Mantenimiento de aire acondicionado' if es_aire else 'Limpieza de estación'} - {estacion} - {fecha}"
+                enviar_correo(servicio_gmail, secreto("correo_coordinador"), asunto, cuerpo, [(nombre_archivo, pdf_bytes, "application/pdf")])
+                st.success("✅ Correo enviado al coordinador.")
+            except Exception as e:
+                st.error(f"❌ No se pudo enviar el correo: {error_google(e)}")
+
+if es_formato_estacion:
+    formato_estacion()
+    st.stop()
 
 # ==========================================
 # 1. DATOS DEL ANALIZADOR
@@ -2037,24 +2325,13 @@ _secciones_pdf = [(s, pdf_secciones[s]) for s in ORDEN_PDF if s in pdf_secciones
 def generar_pdf():
     return construir_pdf(_titulo_pdf, _subtitulo_pdf, _secciones_pdf, _logo_pdf)
 
-def _segmento_archivo(texto, vacio):
-    """Parte del nombre sin caracteres no válidos en Windows, Drive o adjuntos de correo."""
-    limpio = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", str(texto)).strip(" .-")
-    return limpio or vacio
-
 def codigo_equipo():
     """Código del equipo usado en el nombre del archivo y en la carpeta de Drive (O3, NOx, CO, SO2, PM10_BAM, PM2.5_Thermo...)."""
     if es_gas: return {"Ozono (O3)": "O3", "Óxidos de Nitrógeno (NOx)": "NOx", "Monóxido de Carbono (CO)": "CO", "Dióxido de Azufre (SO2)": "SO2"}.get(gas_sel, "")
     return f"{pm_tipo}_{'BAM' if es_bam else 'Thermo'}"
 
 def nombre_base_archivo():
-    estaciones_abrev = {
-        "Pintas": "PIN", "Santa Fe": "SFE", "Miravalle": "MIR", "Centro": "CEN",
-        "Country": "CTY", "Atemajac": "ATM", "Oblatos": "OBL", "Santa Margarita": "SGM",
-        "Vallarta": "VAL", "Loma Dorada": "LDO", "Águilas": "AGU", "Santa Anita": "SAN",
-        "Tlaquepaque": "TLA"
-    }
-    est_cod = estaciones_abrev.get(estacion_sel, "XXX")
+    est_cod = ABREV_ESTACION.get(estacion_sel, "XXX")
     gas_cod = codigo_equipo()
 
     # estaciones sin número de serie registrado: se marca en lugar de dejar un segmento vacío ("__")
@@ -2108,21 +2385,6 @@ with col_pdf:
     st.download_button("📄 Descargar PDF del formato", data=b"" if bloqueado else generar_pdf, file_name=nombre_pdf(),
                        mime="application/pdf", use_container_width=True, disabled=bloqueado, on_click="ignore",
                        help=motivo_bloqueo)
-
-def subir_a_drive(servicio, nombre, datos, mimetype, carpeta_id):
-    media = MediaIoBaseUpload(io.BytesIO(datos), mimetype=mimetype, resumable=True)
-    # create siempre agrega un archivo nuevo: los reportes anteriores con el mismo nombre se conservan
-    return servicio.files().create(body={"name": nombre, "parents": [carpeta_id]}, media_body=media, fields="id,webViewLink").execute(num_retries=3)
-
-def enviar_correo(servicio, destinatario, asunto, cuerpo, adjuntos):
-    mensaje = EmailMessage()
-    mensaje["To"], mensaje["Subject"] = destinatario, asunto
-    mensaje.set_content(cuerpo)
-    for nombre, datos, mimetype in adjuntos:
-        tipo, subtipo = mimetype.split("/")
-        mensaje.add_attachment(datos, maintype=tipo, subtype=subtipo, filename=nombre)
-    crudo = base64.urlsafe_b64encode(mensaje.as_bytes()).decode()
-    servicio.users().messages().send(userId="me", body={"raw": crudo}).execute()
 
 with col_drive:
     if st.button("☁️ Respaldar en Drive y enviar al coordinador", use_container_width=True, disabled=bloqueado, help=motivo_bloqueo):
