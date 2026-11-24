@@ -1549,105 +1549,161 @@ if es_particulas:
             else: columna.error("NO CUMPLE ❌")
 
         if es_thermo:
-            def sensor_3p(titulo, limite_dif, val_ideal_desc):
-                """Verificación de un sensor con tres lecturas calibrador/monitor y su promedio."""
-                pesos = [1, 1, 1, 1.3]
-                enc = ["Calibrador", "Monitor", "Diferencia", "Comentarios"]
-                st.markdown(f"#### {titulo}")
-                c1, c2, c3, c4 = st.columns(pesos)
-                c1.write("**Calibrador**"); c2.write("**Monitor**"); c3.write("**Diferencia**"); c4.write("**Comentarios**")
+            # Mismo orden que el formato en papel: tabla de lecturas a la izquierda y, a la derecha,
+            # si el sensor requirió calibración/ajuste y los comentarios de lo que se hizo.
+            def fmt(v, dec=2):
+                return f"{v:.{dec}f}" if v is not None else ""
 
-                cal_v, mon_v = [], []
-                for i in range(1, 4):
+            def ajuste_sensor(titulo, key, accion="calibración", ph="Describe el ajuste y el valor en que quedó el sensor..."):
+                """«El sensor requirió calibración/ajuste» (Sí / No) y comentarios. Devuelve la respuesta (None si no se marcó)."""
+                st.markdown(f"**El sensor requirió {accion}**")
+                resp = st.radio(f"{titulo}: requirió {accion}", ["Sí", "No"], index=None, horizontal=True,
+                                key=f"{key}_req", label_visibility="collapsed")
+                st.markdown("**Comentarios**")
+                com = st.text_area(f"Comentarios {titulo}", key=f"{key}_com", label_visibility="collapsed",
+                                   placeholder=ph, height="content")
+                tabla_pdf(S_SENS, f"{titulo} · Ajuste", [f"El sensor requirió {accion}", "Comentarios"],
+                          [Neg(resp or ""), Caja(com, "Sin comentarios")], [1.2, 3])
+                return resp
+
+            def sensor_3p(titulo, unidad, limite_dif, key):
+                """Tres lecturas calibrador/monitor, promedio y diferencia (Calibrador - Monitor) como en el formato en papel."""
+                pesos = [0.9, 1, 1, 1.1]
+                enc, pesos_pdf = ["", "Calibrador", "Monitor", "Diferencia", "Resultado"], [0.9, 1, 1, 1.1, 1.1]
+                st.markdown(f"#### {titulo} ({unidad})")
+                izq, der = st.columns([3, 2], gap="large")
+                with izq:
                     c1, c2, c3, c4 = st.columns(pesos)
-                    c_val = c1.number_input(f"c{i}", format="%.4f", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
-                    m_val = c2.number_input(f"m{i}", format="%.4f", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
-                    dif_txt = f"{(m_val - c_val):.4f}" if c_val is not None and m_val is not None else "-"
-                    c3.write(dif_txt)
-                    tabla_pdf(S_SENS, titulo, enc, [Caja(c_val), Caja(m_val), dif_txt, ""], pesos)
-                    if c_val is not None: cal_v.append(c_val)
-                    if m_val is not None: mon_v.append(m_val)
+                    c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Diferencia**")
+                    cal_v, mon_v = [], []
+                    for i in range(1, 4):
+                        c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="center")
+                        c1.write(f"**{i}**")
+                        # se conservan las claves anteriores ({titulo}_c1...) para no perder borradores guardados
+                        c_val = c2.number_input(f"{titulo} calibrador {i}", format="%.2f", key=f"{titulo}_c{i}", label_visibility="collapsed", value=None)
+                        m_val = c3.number_input(f"{titulo} monitor {i}", format="%.2f", key=f"{titulo}_m{i}", label_visibility="collapsed", value=None)
+                        tabla_pdf(S_SENS, f"{titulo} ({unidad})", enc, [str(i), Caja(fmt(c_val)), Caja(fmt(m_val)), "", ""], pesos_pdf)
+                        if c_val is not None: cal_v.append(c_val)
+                        if m_val is not None: mon_v.append(m_val)
 
-                prom_c = sum(cal_v) / len(cal_v) if cal_v else None
-                prom_m = sum(mon_v) / len(mon_v) if mon_v else None
-                c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="top")
-                c1.write(f"**{prom_c:.4f}**" if prom_c is not None else "Promedio")
-                c2.write(f"**{prom_m:.4f}**" if prom_m is not None else "Promedio")
-                dif_txt, ok = "-", None
-                if prom_c is not None and prom_m is not None:
-                    dif_prom = prom_m - prom_c
-                    ok = abs(dif_prom) <= limite_dif
-                    dif_txt = f"{dif_prom:.4f}"
-                c3.write(f"**{dif_txt}**")
-                resultado(c4, ok)
-                tabla_pdf(S_SENS, titulo, enc, [Neg(f"{prom_c:.4f}" if prom_c is not None else "Promedio"),
-                                                Neg(f"{prom_m:.4f}" if prom_m is not None else "Promedio"), Neg(dif_txt), _res(ok)], pesos)
-                nota_pdf(S_SENS, f"{titulo}: {val_ideal_desc}")
-                st.write(f"<small>{val_ideal_desc}</small>", unsafe_allow_html=True)
+                    prom_c = sum(cal_v) / len(cal_v) if cal_v else None
+                    prom_m = sum(mon_v) / len(mon_v) if mon_v else None
+                    dif = prom_c - prom_m if prom_c is not None and prom_m is not None else None
+                    ok = None if dif is None else abs(dif) < limite_dif
+                    c1, c2, c3, c4 = st.columns(pesos, vertical_alignment="center")
+                    c1.write("**Promedio**"); c2.write(f"**{fmt(prom_c) or '-'}**"); c3.write(f"**{fmt(prom_m) or '-'}**")
+                    c4.write(f"**{fmt(dif) or '-'}**")
+                    if ok is not None:
+                        (st.success if ok else st.error)(f"Diferencia {fmt(dif)} {unidad}: {'Cumple ✅' if ok else 'NO CUMPLE ❌ (calibrar sensor)'}")
+                    st.caption(f"La diferencia debe ser menor a ± {limite_dif:g} {unidad}. En caso de que esté fuera de límites, calibrar sensor.")
+                    tabla_pdf(S_SENS, f"{titulo} ({unidad})", enc,
+                              [Neg("Promedio"), Neg(fmt(prom_c)), Neg(fmt(prom_m)), Neg(fmt(dif)), _res(ok)], pesos_pdf)
+                with der:
+                    resp = ajuste_sensor(titulo, key)
+                    if resp == "Sí":
+                        final = st.number_input(f"Monitor después del ajuste ({unidad})", format="%.2f", value=None, key=f"{key}_final",
+                                                help="Lectura del monitor al terminar la calibración del sensor.")
+                        if final is not None and prom_c is not None:
+                            dif_f = prom_c - final
+                            ok_f = abs(dif_f) < limite_dif
+                            (st.success if ok_f else st.error)(f"Después del ajuste: diferencia {fmt(dif_f)} {unidad} - {'Cumple' if ok_f else 'NO CUMPLE'}")
+                            tabla_pdf(S_SENS, f"{titulo} · Después del ajuste", ["Calibrador (promedio)", "Monitor después del ajuste", "Diferencia", "Resultado"],
+                                      [Caja(fmt(prom_c)), Caja(fmt(final)), fmt(dif_f), _res(ok_f)], [1, 1, 1, 1])
+                nota_pdf(S_SENS, f"{titulo}: la diferencia (Calibrador - Monitor) debe ser menor a ± {limite_dif:g} {unidad}.")
+                st.divider()
 
-            sensor_3p("Temperatura Ambiente", 2.0, "La diferencia debe ser menor a ± 2 °C")
-            sensor_3p("Humedad Relativa", 2.0, "La diferencia debe ser menor a ± 2 %")
-            sensor_3p("Temperatura de flujo", 2.0, "La diferencia debe ser menor a ± 2 °C")
+            sensor_3p("Temperatura Ambiente", "°C", 2.0, "th_s_tamb")
+            sensor_3p("Humedad Relativa", "%", 2.0, "th_s_hr")
+            sensor_3p("Temperatura de flujo", "°C", 2.0, "th_s_tflujo")
+
+            # --- Presión barométrica: lectura (± 10 mmHg) y calibración (± 2 mmHg); diferencia Monitor - Calibrador ---
+            pesos_baro = [1.1, 1, 1, 1.1]
+            enc_baro = ["", "Calibrador", "Monitor", "Diferencia", "Resultado"]
+            st.markdown("#### Presión Barométrica (mmHg)")
+            izq, der = st.columns([3, 2], gap="large")
+            with izq:
+                for fila_baro, k_cal, k_mon, limite in [("Lectura", "C_bar_l", "M_bar_l", 10), ("Calibración", "C_bar_c", "M_bar_c", 2)]:
+                    c1, c2, c3, c4 = st.columns(pesos_baro)
+                    c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Diferencia**")
+                    c1, c2, c3, c4 = st.columns(pesos_baro, vertical_alignment="center")
+                    c1.write(f"**{fila_baro}**")
+                    c_bar = c2.number_input(f"Calibrador {fila_baro}", format="%.1f", label_visibility="collapsed", value=None, key=k_cal)
+                    m_bar = c3.number_input(f"Monitor {fila_baro}", format="%.1f", label_visibility="collapsed", value=None, key=k_mon)
+                    dif_bar = m_bar - c_bar if c_bar is not None and m_bar is not None else None
+                    ok_bar = None if dif_bar is None else abs(dif_bar) < limite
+                    if ok_bar is None: c4.write("-")
+                    else: (c4.success if ok_bar else c4.error)(f"{dif_bar:.1f}")
+                    st.caption(f"La diferencia debe ser menor a ± {limite} mmHg. En caso de que esté fuera de límites, calibrar sensor.")
+                    tabla_pdf(S_SENS, f"Presión Barométrica · {fila_baro} (mmHg)", enc_baro,
+                              [Neg(fila_baro), Caja(fmt(c_bar, 1)), Caja(fmt(m_bar, 1)), "" if dif_bar is None else f"{dif_bar:.1f}", _res(ok_bar)], pesos_baro + [1.1])
+            with der:
+                ajuste_sensor("Presión Barométrica", "th_s_pbaro")
+            nota_pdf(S_SENS, "Presión barométrica: diferencia menor a ± 10 mmHg en la lectura y menor a ± 2 mmHg después de la calibración.")
             st.divider()
 
-            pesos_baro = [1.1, 1, 1, 1, 1.4]
-            enc_baro = ["", "Calibrador", "Monitor", "Diferencia (mmHg)", "Comentarios"]
-            st.markdown("#### Presión Barométrica")
-            c1, c2, c3, c4, c5 = st.columns(pesos_baro)
-            c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**Diferencia (mmHg)**"); c5.write("**Comentarios**")
-            for fila_baro, k_cal, k_mon, k_obs, limite in [("Lectura", "C_bar_l", "M_bar_l", "obs_bar1", 10), ("Calibración", "C_bar_c", "M_bar_c", "obs_bar2", 2)]:
-                c1, c2, c3, c4, c5 = st.columns(pesos_baro, vertical_alignment="top")
-                c1.write(fila_baro)
-                c_bar = c2.number_input(k_cal, format="%.4f", label_visibility="collapsed", value=None, key=k_cal)
-                m_bar = c3.number_input(k_mon, format="%.4f", label_visibility="collapsed", value=None, key=k_mon)
-                dif_bar = f"{abs(m_bar - c_bar):.4f}" if c_bar is not None and m_bar is not None else ""
-                ok_bar = abs(m_bar - c_bar) < limite if dif_bar else None
-                c4.write(dif_bar or "-")
-                resultado(c5, ok_bar)
-                st.write(f"<small>{fila_baro}: la diferencia debe ser menor a ± {limite} mmHg</small>", unsafe_allow_html=True)
-                tabla_pdf(S_SENS, "Presión Barométrica", enc_baro, [fila_baro, Caja(c_bar), Caja(m_bar), dif_bar, _res(ok_bar)], pesos_baro)
-            nota_pdf(S_SENS, "Presión barométrica: diferencia menor a ± 10 mmHg en la lectura y menor a ± 2 mmHg después de la calibración.")
+            # --- Vacío de la bomba (PVac) y presión de flujo de span (Pf): manómetro certificado contra monitor inicial y final ---
+            def presion_manometro(titulo, unidad, nombre_man, k_man, k_ini, k_fin, key, ph):
+                pesos_p = [0.9, 1.3, 1, 1]
+                enc_p = ["", nombre_man, "Monitor inicial", "Monitor final"]
+                st.markdown(f"#### {titulo} ({unidad})")
+                izq, der = st.columns([3, 2], gap="large")
+                with izq:
+                    c1, c2, c3, c4 = st.columns(pesos_p)
+                    c2.write(f"**{nombre_man}**"); c3.write("**Monitor inicial**"); c4.write("**Monitor final**")
+                    c1, c2, c3, c4 = st.columns(pesos_p, vertical_alignment="center")
+                    c1.write("**Lectura**")
+                    v_man = c2.number_input(f"{titulo} {nombre_man}", format="%.1f", label_visibility="collapsed", value=None, key=k_man)
+                    v_ini = c3.number_input(f"{titulo} monitor inicial", format="%.1f", label_visibility="collapsed", value=None, key=k_ini)
+                    v_fin = c4.number_input(f"{titulo} monitor final", format="%.1f", label_visibility="collapsed", value=None, key=k_fin)
+                    if v_man is not None and v_fin is not None:
+                        st.caption(f"Diferencia final (Monitor - Manómetro): {v_fin - v_man:.1f} {unidad}")
+                    tabla_pdf(S_SENS, f"{titulo} ({unidad})", enc_p, [Neg("Lectura"), Caja(fmt(v_man, 1)), Caja(fmt(v_ini, 1)), Caja(fmt(v_fin, 1))], pesos_p)
+                with der:
+                    ajuste_sensor(titulo, key, accion="ajuste", ph=ph)
+                st.divider()
 
-            pesos_pfs = [1, 1.4, 1, 1]
-            st.markdown("#### Presión de Flujo de span (mmHg)")
-            c1, c2, c3, c4 = st.columns(pesos_pfs)
-            c1.write(""); c2.write("**Manómetro Certificado**"); c3.write("**Monitor Inicial**"); c4.write("**Monitor Final**")
+            presion_manometro("Vacío de la Bomba (PVac)", "mmHg", "Manómetro Certificado", "th_pvac_man", "th_pvac_ini", "th_pvac_fin", "th_s_pvac",
+                              "Ej. No se ajustó el valor, ya que estaba dentro de rango...")
+            # se conservan las claves anteriores (pfs_man, pfs_mini, pfs_mfin)
+            presion_manometro("Presión de Flujo de span (Pf)", "mmHg", "Manómetro Diferencial Certificado", "pfs_man", "pfs_mini", "pfs_mfin", "th_s_pf",
+                              "Ej. Se ajusta la presión quedando operando con el valor de 24.9...")
 
-            c1, c2, c3, c4 = st.columns(pesos_pfs, vertical_alignment="top")
-            c1.write("Lectura")
-            man_dif = c2.number_input("man_dif", format="%.4f", label_visibility="collapsed", value=None, key="pfs_man")
-            mon_ini = c3.number_input("mon_ini", format="%.4f", label_visibility="collapsed", value=None, key="pfs_mini")
-            mon_fin = c4.number_input("mon_fin", format="%.4f", label_visibility="collapsed", value=None, key="pfs_mfin")
-
-            enc_pfs = ["", "Manómetro Certificado", "Monitor Inicial", "Monitor Final"]
-            tabla_pdf(S_SENS, "Presión de Flujo de span (mmHg)", enc_pfs, ["Lectura", Caja(man_dif), Caja(mon_ini), Caja(mon_fin)], pesos_pfs)
-
-            def render_flujo_thermo(titulo, key_prefix):
-                pesos_flujo = [1, 1, 1, 1, 1.4]
+            # --- Flujo automático y manual: el flujo debe quedar entre 16.00 y 17.34 Lpm ---
+            def render_flujo_thermo(titulo, key_prefix, con_requerimiento, ph):
+                pesos_flujo = [0.9, 1, 1, 1.2]
                 st.markdown(f"#### {titulo} (Lpm)")
-                c1, c2, c3, c4, c5 = st.columns(pesos_flujo)
-                c1.write(""); c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**% Desviación**"); c5.write("**Comentarios**")
+                izq, der = st.columns([3, 2], gap="large")
+                with izq:
+                    c1, c2, c3, c4 = st.columns(pesos_flujo)
+                    c2.write("**Calibrador**"); c3.write("**Monitor**"); c4.write("**% Desviación**")
+                    c1, c2, c3, c4 = st.columns(pesos_flujo, vertical_alignment="center")
+                    c1.write("**Lectura**")
+                    f_cal = c2.number_input(f"{titulo} calibrador", format="%.2f", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
+                    f_mon = c3.number_input(f"{titulo} monitor", format="%.2f", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
+                    # el criterio se evalúa con el flujo del calibrador (flujo real); si falta, con el del monitor
+                    ref = f_cal if f_cal is not None else f_mon
+                    ok_flujo = None if ref is None else 16.00 <= ref <= 17.34
+                    desv_str = f"{(f_mon - f_cal) / f_cal * 100:.2f} %" if f_cal and f_mon is not None else ""
+                    if ok_flujo is None or not desv_str: c4.write(desv_str or "-")
+                    else: (c4.success if ok_flujo else c4.error)(desv_str)
+                    if ok_flujo is not None:
+                        (st.success if ok_flujo else st.error)(f"Flujo {ref:.2f} Lpm: {'Cumple ✅' if ok_flujo else 'NO CUMPLE ❌ (calibrar flujo)'}")
+                    st.caption("El valor del flujo promedio debe estar entre 16.00 y 17.34 Lpm. En caso de que esté fuera de límites, calibrar sensor.")
+                    tabla_pdf(S_SENS, f"{titulo} (Lpm)", ["", "Calibrador", "Monitor", "Porcentaje / Desviación", "Resultado"],
+                              [Neg("Lectura"), Caja(fmt(f_cal)), Caja(fmt(f_mon)), desv_str, _res(ok_flujo)], pesos_flujo + [1])
+                with der:
+                    if con_requerimiento:
+                        ajuste_sensor(titulo, f"th_s_{key_prefix}", ph=ph)
+                    else:
+                        st.markdown("**Comentarios**")
+                        com = st.text_area(f"Comentarios {titulo}", key=f"th_s_{key_prefix}_com", label_visibility="collapsed", height="content", placeholder=ph)
+                        tabla_pdf(S_SENS, f"{titulo} · Comentarios", ["Comentarios"], [Caja(com, "Sin comentarios")], [1])
+                st.divider()
 
-                c1, c2, c3, c4, c5 = st.columns(pesos_flujo, vertical_alignment="top")
-                c1.write("Lectura")
-                f_cal = c2.number_input("f_cal", format="%.4f", label_visibility="collapsed", value=None, key=f"{key_prefix}_cal")
-                f_mon = c3.number_input("f_mon", format="%.4f", label_visibility="collapsed", value=None, key=f"{key_prefix}_mon")
-                ok_flujo = None if f_mon is None else 16.00 <= f_mon <= 17.34
-                resultado(c5, ok_flujo)
-
-                desv_str = ""
-                if f_cal and f_mon is not None:
-                    desv = ((f_mon - f_cal) / f_cal) * 100
-                    desv_str = f"{desv:.2f}%"
-                c4.write(f"**{desv_str}**" if desv_str else "-")
-
-                st.write("<small>El valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.</small>", unsafe_allow_html=True)
-
-                enc_flujo = ["", "Calibrador", "Monitor", "% Desviación", "Comentarios"]
-                tabla_pdf(S_SENS, f"{titulo} (Lpm)", enc_flujo, ["Lectura", Caja(f_cal), Caja(f_mon), desv_str, _res(ok_flujo)], pesos_flujo)
-
-            render_flujo_thermo("Flujo Automático", "fauto")
-            render_flujo_thermo("Flujo Manual", "fman")
+            render_flujo_thermo("Flujo Automático", "fauto", True,
+                                "Ej. No se ajustó automáticamente el flujo, por lo que se procede al ajuste manual...")
+            render_flujo_thermo("Flujo Manual", "fman", False,
+                                "Ej. Se ajustó manualmente el flujo quedando dentro de los límites, con valor promedio de 16.80 Lpm...")
             nota_pdf(S_SENS, "Flujo: el valor promedio debe estar entre 16.00 y 17.34 Lpm. Si sale de límites, calibrar sensor.")
 
         elif es_bam:
