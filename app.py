@@ -473,6 +473,13 @@ CARPETA_ASISTENTE = "Asistente"
 ARCHIVO_CONOCIMIENTO = "conocimiento.json"  # lo que la coordinación agrega, edita o elimina de la base del asistente
 ARCHIVO_PENDIENTES = "preguntas_pendientes.json"  # preguntas que el asistente no supo responder
 CARPETAS_NO_REPORTES = {CARPETA_BORRADORES, CARPETA_ASISTENTE}
+# Los reportes se separan por tipo de trabajo: <raíz>/Mantenimiento Externo <año>/<Estación>/<Equipo>,
+# <raíz>/SIMAJ/<Estación>/<Equipo> (calibraciones, limpieza y aire acondicionado) y <raíz>/Diagnósticos/<Equipo>.
+CARPETA_SIMAJ = "SIMAJ"
+CARPETA_DIAGNOSTICOS = "Diagnósticos"
+
+def carpeta_externo(año):
+    return f"Mantenimiento Externo {año}"
 
 def leer_json_drive(servicio, nombre, vacio):
     """(id, contenido) de un JSON de la carpeta Asistente; (None, vacio) si todavía no existe."""
@@ -570,7 +577,7 @@ else:
 
 @st.cache_data(ttl=300, show_spinner="Buscando reportes en Drive...")
 def listar_reportes(raiz):
-    """Reportes guardados por la app: <raíz>/<Estación o Diagnósticos>/<Equipo>/archivo."""
+    """Reportes guardados por la app en cualquier subcarpeta: <raíz>/[Tipo]/<Estación o Diagnósticos>/<Equipo>/archivo."""
     servicio = build("drive", "v3", credentials=credenciales_google())
 
     def hijos(padre):
@@ -584,17 +591,19 @@ def listar_reportes(raiz):
                 return salida
 
     reportes = []
-    for c1 in hijos(raiz):
-        if c1["mimeType"] != TIPO_CARPETA or c1["name"] in CARPETAS_NO_REPORTES:
-            continue
-        for c2 in hijos(c1["id"]):
-            if c2["mimeType"] != TIPO_CARPETA:
-                continue
-            for f in hijos(c2["id"]):
-                if f["mimeType"] != TIPO_CARPETA:
-                    reportes.append({"Fecha": f["name"][:10].replace(".", "-") if re.match(r"^\d{4}\.\d{2}\.\d{2}", f["name"]) else "",
-                                     "Estación / carpeta": c1["name"], "Equipo": c2["name"], "Archivo": f["name"],
-                                     "Abrir": f.get("webViewLink", ""), "id": f["id"]})
+
+    def recorrer(carpeta_id, ruta):
+        for f in hijos(carpeta_id):
+            if f["mimeType"] == TIPO_CARPETA:
+                if ruta or f["name"] not in CARPETAS_NO_REPORTES:
+                    recorrer(f["id"], ruta + [f["name"]])
+            elif len(ruta) >= 2:  # los archivos sueltos en la raíz o en una carpeta de primer nivel no son reportes
+                tipo = ruta[0] if len(ruta) >= 3 else (CARPETA_DIAGNOSTICOS if ruta[0] == CARPETA_DIAGNOSTICOS else "Sin clasificar")
+                reportes.append({"Fecha": f["name"][:10].replace(".", "-") if re.match(r"^\d{4}\.\d{2}\.\d{2}", f["name"]) else "",
+                                 "Tipo": tipo, "Estación / carpeta": ruta[-2], "Equipo": ruta[-1], "Archivo": f["name"],
+                                 "Abrir": f.get("webViewLink", ""), "id": f["id"]})
+
+    recorrer(raiz, [])
     return sorted(reportes, key=lambda r: (r["Fecha"], r["Archivo"]), reverse=True)
 
 def descargar_archivo_drive(archivo_id):
@@ -616,13 +625,15 @@ def panel_coordinacion():
         except Exception as e:
             st.error(f"No se pudo leer Drive: {error_google(e)}")
             reportes = []
-        c1, c2, c3 = st.columns(3)
-        carpetas = ["Todas"] + sorted({r["Estación / carpeta"] for r in reportes})
+        c0, c1, c2, c3 = st.columns(4)
+        f_tipo = c0.selectbox("Tipo", ["Todos"] + sorted({r["Tipo"] for r in reportes}), key="_coord_f_tipo")
+        de_tipo = [r for r in reportes if f_tipo in ("Todos", r["Tipo"])]
+        carpetas = ["Todas"] + sorted({r["Estación / carpeta"] for r in de_tipo})
         f_carpeta = c1.selectbox("Estación / carpeta", carpetas, key="_coord_f_carpeta")
-        equipos_h = ["Todos"] + sorted({r["Equipo"] for r in reportes if f_carpeta in ("Todas", r["Estación / carpeta"])})
+        equipos_h = ["Todos"] + sorted({r["Equipo"] for r in de_tipo if f_carpeta in ("Todas", r["Estación / carpeta"])})
         f_equipo = c2.selectbox("Equipo", equipos_h, key="_coord_f_equipo")
         f_texto = c3.text_input("Buscar en el nombre (N/S, fecha, PROV...)", key="_coord_f_texto")
-        filtrados = [r for r in reportes if f_carpeta in ("Todas", r["Estación / carpeta"]) and f_equipo in ("Todos", r["Equipo"])
+        filtrados = [r for r in de_tipo if f_carpeta in ("Todas", r["Estación / carpeta"]) and f_equipo in ("Todos", r["Equipo"])
                      and asistente.normalizar(f_texto) in asistente.normalizar(r["Archivo"])]
         st.caption(f"{len(filtrados)} de {len(reportes)} reportes guardados por la app.")
         if filtrados:
@@ -1229,7 +1240,7 @@ def formato_estacion():
     est_cod = ABREV_ESTACION.get(estacion, "XXX")
     partes = [fecha.strftime("%Y.%m.%d"), codigo, est_cod] + ([_segmento_archivo(num_serie, "SIN-NS")] if es_aire else []) + ["SIMAJ"]
     nombre_archivo = "_".join(partes) + ".pdf"
-    carpeta = [estacion, "Aire_acondicionado" if es_aire else "Limpieza_estacion"]
+    carpeta = [CARPETA_SIMAJ, estacion, "Aire_acondicionado" if es_aire else "Limpieza_estacion"]
     que = "el reporte de mantenimiento preventivo de aire acondicionado" if es_aire else "el reporte de limpieza"
     orden = [S_AA_DAT, S_AA_LIM, S_AA_VER, S_AA_PAR, S_EV, S_OBF] if es_aire else [S_LE_DAT, S_LE_ACT, S_EV, S_OBF]
     secciones = [(s, pdf_secciones[s]) for s in orden if s in pdf_secciones]
@@ -2458,8 +2469,10 @@ with col_drive:
             with mensajes, st.spinner("Subiendo el reporte a Google Drive..."):
                 try:
                     servicio_drive = build("drive", "v3", credentials=credenciales_google())
-                    # cada reporte va a su carpeta Estación/Equipo dentro de la carpeta principal
-                    ruta_drive = ["Diagnósticos", codigo_equipo()] if es_diagnostico else [estacion_sel, codigo_equipo()]
+                    # Mantenimiento Externo <año>/Estación/Equipo, SIMAJ/Estación/Equipo o Diagnósticos/Equipo
+                    if es_diagnostico: ruta_drive = [CARPETA_DIAGNOSTICOS, codigo_equipo()]
+                    elif es_externo: ruta_drive = [carpeta_externo(año_f), estacion_sel, codigo_equipo()]
+                    else: ruta_drive = [CARPETA_SIMAJ, estacion_sel, codigo_equipo()]
                     carpeta_reporte = carpeta_drive(servicio_drive, secreto("drive_carpeta_id"), ruta_drive)
                     pdf_subido = subir_a_drive(servicio_drive, nombre_del_pdf, pdf_bytes, "application/pdf", carpeta_reporte)
                     enlace = pdf_subido.get("webViewLink", "")
